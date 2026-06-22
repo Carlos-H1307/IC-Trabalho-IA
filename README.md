@@ -52,15 +52,41 @@ Isso cria automaticamente um ambiente virtual em `.venv/` e instala todas as dep
 
 ### 4. Adicionar a base de dados
 
-Coloque o arquivo CSV da base de dados em `files/raw/`. A pasta está no `.gitignore` e não é versionada — o dataset é distribuído separadamente pelo professor via Teams.
+Coloque o arquivo da base (formato CSV ou XLSX) em `files/raw/cervical-cancer.xlsx`. A pasta está no `.gitignore` — o dataset é distribuído separadamente pelo professor via Teams.
+
+Por padrão o código procura `files/raw/cervical-cancer.xlsx`. Use `--data-path` para apontar para outro caminho.
 
 ## Executar
+
+Execução completa (20 experimentos × 200 gerações, conforme o trabalho):
 
 ```bash
 uv run python src/main.py
 ```
 
-Os resultados são salvos em `logs/` e os gráficos em `plots/`.
+Modo rápido para teste (poucas gerações e indivíduos):
+
+```bash
+uv run python src/main.py --quick
+```
+
+Outras opções úteis:
+
+```bash
+uv run python src/main.py --experiments 5 --generations 50 --sample-size 5000
+uv run python src/main.py --sample-size 0   # usa a base completa, sem amostragem
+```
+
+Os resultados são salvos em `logs/` (CSV) e os gráficos em `plots/`.
+
+### Saídas geradas
+
+- `logs/ga_metrics.csv` — por experimento e geração: melhor/médio/pior fitness, melhor F1, nº de atributos ativos e cromossomo.
+- `logs/nn_metrics.csv` — por avaliação da rede: losses, acurácia, F1, épocas e nº de atributos.
+- `plots/ga_convergencia_media.png` — curva média da convergência ao longo dos experimentos (com banda de desvio).
+- `plots/ga_convergencia_por_experimento.png` — curvas individuais de cada experimento.
+- `plots/ga_fitness_componentes.png` — melhor/médio/pior do primeiro experimento.
+- `plots/nn_atributos_vs_f1.png` — dispersão de F1-Score por número de atributos ativos.
 
 ## Estrutura
 
@@ -101,5 +127,14 @@ docs/
 |---|---|
 | Camadas ocultas | 32 neurônios (ReLU) → 16 neurônios (ReLU) |
 | Saída | Softmax |
+| Loss | Sparse Categorical Crossentropy |
 | Otimizador | Adam (lr = 0,001) |
-| Divisão dos dados | 70% treino / 15% validação / 15% teste |
+| Divisão dos dados | 70% treino / 15% validação / 15% teste (estratificada) |
+| Early stopping | Sim, paciência 5 sobre `val_loss` |
+| Métrica de aptidão | F1-Score macro no conjunto de teste |
+
+## Notas de implementação
+
+- **Vazamento de alvo**: a base contém colunas que descrevem diretamente a causa do óbito (`CAUSABAS`, `causabas_categoria`, `LINHAA`..`LINHAD` etc.). Essas colunas são removidas no pré-processamento (`TARGET_LEAK_COLUMNS` em `data_loader.py`), caso contrário o classificador atinge F1 = 1,0 trivialmente.
+- **Amostragem estratificada**: por padrão o pipeline trabalha com uma amostra estratificada de 3000 registros para tornar 20 experimentos × 200 gerações tratáveis em uma máquina pessoal. Use `--sample-size 0` para a base completa.
+- **Cache de fitness**: cromossomos idênticos (mesma máscara binária) reaproveitam a avaliação anterior, reduzindo significativamente o número de treinos da MLP.

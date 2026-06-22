@@ -1,42 +1,92 @@
-import os
 import csv
+import os
+
 
 class MetricsLogger:
+    """
+    Escreve em CSV as métricas do AG (por experimento e geração) e da NN
+    (por avaliação de cromossomo).
+    """
+
+    GA_HEADER = [
+        "experimento",
+        "geracao",
+        "melhor_fitness",
+        "fitness_medio",
+        "pior_fitness",
+        "melhor_f1",
+        "num_atributos_ativos",
+        "melhor_cromossomo",
+    ]
+
+    NN_HEADER = [
+        "id_cromossomo",
+        "geracao",
+        "loss_treino",
+        "loss_validacao",
+        "acuracia_validacao",
+        "f1_score",
+        "epocas",
+        "num_atributos_usados",
+    ]
+
     def __init__(self, log_dir="logs"):
         self.log_dir = log_dir
         self.ga_log_path = os.path.join(log_dir, "ga_metrics.csv")
         self.nn_log_path = os.path.join(log_dir, "nn_metrics.csv")
-        
-        # Cria a pasta de logs se ela não existir
         os.makedirs(log_dir, exist_ok=True)
-        
-        # Inicializa os arquivos com os cabeçalhos (headers)
-        self._init_ga_log()
-        self._init_nn_log()
+        self._init_log(self.ga_log_path, self.GA_HEADER)
+        self._init_log(self.nn_log_path, self.NN_HEADER)
 
-    def _init_ga_log(self):
-        if not os.path.exists(self.ga_log_path):
-            with open(self.ga_log_path, mode='w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(["geracao", "melhor_fitness", "fitness_medio", "pior_fitness", "melhor_cromossomo"])
+    @staticmethod
+    def _init_log(path, header):
+        # Reescreve o arquivo a cada execução para evitar mistura entre rodadas
+        with open(path, mode="w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(header)
 
-    def _init_nn_log(self):
-        if not os.path.exists(self.nn_log_path):
-            with open(self.nn_log_path, mode='w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(["id_cromossomo", "geracao", "loss_treino", "loss_validacao", "acuracia_validacao", "epocas", "num_atributos_usados"])
+    def log_ga_metrics(
+        self,
+        experiment_id,
+        generation,
+        best_fitness,
+        avg_fitness,
+        worst_fitness,
+        best_chromosome,
+        num_active,
+        best_f1,
+    ):
+        chromosome_str = "".join(map(str, best_chromosome))
+        with open(self.ga_log_path, mode="a", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow([
+                experiment_id,
+                generation,
+                best_fitness,
+                avg_fitness,
+                worst_fitness,
+                best_f1,
+                num_active,
+                chromosome_str,
+            ])
 
-    def log_ga_metrics(self, generation, best_fitness, avg_fitness, worst_fitness, best_chromosome):
-        """Salva o resumo de desempenho de uma geração do Algoritmo Genético."""
-        # Converte a lista do cromossomo (ex: [1, 0, 1]) em string para salvar no CSV
-        chromosome_str = "-".join(map(str, best_chromosome))
-        
-        with open(self.ga_log_path, mode='a', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow([generation, best_fitness, avg_fitness, worst_fitness, chromosome_str])
-
-    def log_nn_metrics(self, chromosome_id, generation, train_loss, val_loss, val_accuracy, epochs, num_features_used):
-        """Salva os detalhes do treinamento da Rede Neural para um cromossomo específico."""
-        with open(self.nn_log_path, mode='a', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow([chromosome_id, generation, train_loss, val_loss, val_accuracy, epochs, num_features_used])
+    def log_nn_metrics(
+        self,
+        chromosome_id,
+        generation,
+        train_loss,
+        val_loss,
+        val_accuracy,
+        f1_score,
+        epochs,
+        num_features_used,
+    ):
+        with open(self.nn_log_path, mode="a", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow([
+                chromosome_id,
+                generation,
+                train_loss,
+                val_loss,
+                val_accuracy,
+                f1_score,
+                epochs,
+                num_features_used,
+            ])

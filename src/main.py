@@ -1,74 +1,191 @@
+import argparse
 import os
-# Importações dos módulos internos da estrutura sugerida
+import random
+import time
+
+import numpy as np
+
 from data_loader import load_and_preprocess_data
 from ga.algorithm import GeneticAlgorithm
 from utils.logger import MetricsLogger
 from utils.plotter import plot_metrics
 
-def main():
-    # 1. Configurações de Caminhos e Hiperparâmetros
-    DATA_PATH = os.path.join("files", "raw", "breast_cancer.csv")
-    LOG_DIR = "logs"
-    PLOT_DIR = "plots"
-    
-    POPULATION_SIZE = 50
-    GENERATIONS = 30
-    MUTATION_RATE = 0.05
-    CROSSOVER_RATE = 0.8
 
-    print("========================================================")
-    print("  Seleção de Características para Cancro de Mama com GA + NN  ")
-    print("========================================================\n")
-    
-    # 2. Carregamento e Pré-processamento dos Dados
-    if not os.path.exists(DATA_PATH):
-        print(f"[ERRO] O ficheiro de dados não foi encontrado em: {DATA_PATH}")
-        print("Por favor, certifique-se de que o dataset está na pasta /files/raw/")
+# ----------------------------------------------------------------------------
+# Hiperparâmetros do trabalho (conforme especificação)
+# ----------------------------------------------------------------------------
+POPULATION_SIZE = 150
+CROSSOVER_RATE = 0.85
+ELITE_SIZE = 10
+GAP = 2
+MAX_GENERATIONS = 200
+STAGNATION_LIMIT = 20
+TOURNAMENT_SIZE = 3
+N_EXPERIMENTS = 20
+
+# Caminhos
+DATA_PATH = os.path.join("files", "raw", "cervical-cancer.xlsx")
+LOG_DIR = "logs"
+PLOT_DIR = "plots"
+
+# Para tornar 20 experimentos × 200 gerações × 150 indivíduos tratáveis,
+# usamos uma amostra estratificada da base. Defina 0 (via CLI) para a base inteira.
+DEFAULT_SAMPLE_SIZE = 3000
+
+
+def _set_seed(seed):
+    """Fixa as sementes para tornar cada experimento reprodutível."""
+    random.seed(seed)
+    np.random.seed(seed)
+    try:
+        import tensorflow as tf
+        tf.random.set_seed(seed)
+    except Exception:
+        pass
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="GA + MLP para seleção de atributos (câncer do colo do útero)."
+    )
+    parser.add_argument("--data-path", default=DATA_PATH,
+                        help="Caminho para o arquivo da base de dados.")
+    parser.add_argument("--population", type=int, default=POPULATION_SIZE)
+    parser.add_argument("--generations", type=int, default=MAX_GENERATIONS)
+    parser.add_argument("--experiments", type=int, default=N_EXPERIMENTS)
+    parser.add_argument("--sample-size", type=int, default=DEFAULT_SAMPLE_SIZE,
+                        help="Amostra estratificada dos registros. Use 0 para usar a base inteira.")
+    parser.add_argument("--quick", action="store_true",
+                        help="Modo rápido para teste: poucos experimentos e gerações.")
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    if args.quick:
+        args.experiments = 2
+        args.generations = 20
+        args.population = 30
+
+    sample_size = args.sample_size if args.sample_size > 0 else None
+
+    print("=" * 70)
+    print("  Seleção de Atributos — Câncer do Colo do Útero")
+    print("  Algoritmo Genético + Rede Neural (Backpropagation)")
+    print("=" * 70)
+
+    if not os.path.exists(args.data_path):
+        print(f"[ERRO] Arquivo não encontrado em: {args.data_path}")
+        print("       Coloque a base em files/raw/ ou use --data-path.")
         return
 
-    print("[INFO] A carregar a base de dados...")
-    X, y, feature_names = load_and_preprocess_data(DATA_PATH)
-    num_features = X.shape[1]
-    print(f"[INFO] Dataset carregado com sucesso. Total de colunas (atributos): {num_features}")
-    
-    # 3. Inicialização do Gestor de Logs
-    # Cria a pasta /logs se não existir e prepara os ficheiros CSV para as métricas
-    logger = MetricsLogger(log_dir=LOG_DIR)
-    
-    # 4. Configuração do Algoritmo Genético
-    print("[INFO] A inicializar o Algoritmo Genético...")
-    ga = GeneticAlgorithm(
-        population_size=POPULATION_SIZE,
-        chromosome_length=num_features,
-        mutation_rate=MUTATION_RATE,
-        crossover_rate=CROSSOVER_RATE,
-        X=X,
-        y=y,
-        logger=logger
+    # ------------------------------------------------------------------
+    # 1) Carregamento e pré-processamento
+    # ------------------------------------------------------------------
+    print(f"\n[INFO] Carregando base de dados de {args.data_path} ...")
+    X, y, feature_names, n_classes = load_and_preprocess_data(
+        args.data_path, sample_size=sample_size, random_state=42
     )
-    
-    # 5. Execução do Processo Evolutivo
-    print(f"[INFO] A iniciar a evolução ao longo de {GENERATIONS} gerações. Por favor, aguarde...")
-    best_chromosome, best_fitness = ga.evolve(generations=GENERATIONS)
-    
-    print("\n==================== EVOLUÇÃO CONCLUÍDA ====================")
-    print(f"Melhor Fitness Alcançado (Acurácia da Rede Neural): {best_fitness:.4f}")
-    
-    # Mapeamento do melhor cromossoma para identificar as colunas relevantes
-    selected_features = [feature_names[i] for i, active in enumerate(best_chromosome) if active == 1]
-    
-    print(f"Número de colunas originais: {num_features}")
-    print(f"Número de colunas selecionadas: {len(selected_features)}")
-    print("\nColunas identificadas como relevantes para o diagnóstico:")
-    for feature in selected_features:
-        print(f" - {feature}")
-    print("============================================================\n")
-    
-    # 6. Geração de Gráficos de Desempenho
-    print("[INFO] A ler os ficheiros de log e a gerar os gráficos das métricas...")
+    L = X.shape[1]
+    mutation_rate = 1.0 / L
+
+    # ------------------------------------------------------------------
+    # 2) Logger
+    # ------------------------------------------------------------------
+    logger = MetricsLogger(log_dir=LOG_DIR)
+
+    # ------------------------------------------------------------------
+    # 3) Loop de N experimentos independentes
+    # ------------------------------------------------------------------
+    print("\n[INFO] Hiperparâmetros:")
+    print(f"  População: {args.population}")
+    print(f"  Crossover Uniforme, Pc = {CROSSOVER_RATE}")
+    print(f"  Mutação: Pm = 1/L = {mutation_rate:.5f} (L = {L})")
+    print(f"  Elitismo: {ELITE_SIZE}, Gap (steady-state): {GAP}")
+    print(f"  Gerações máx.: {args.generations} | Estagnação: {STAGNATION_LIMIT}")
+    print(f"  Experimentos: {args.experiments}")
+    print()
+
+    results = []
+    overall_start = time.time()
+
+    for exp_id in range(args.experiments):
+        print(f"=== Experimento {exp_id + 1}/{args.experiments} ===")
+        _set_seed(seed=42 + exp_id)
+        start = time.time()
+
+        ga = GeneticAlgorithm(
+            population_size=args.population,
+            chromosome_length=L,
+            crossover_rate=CROSSOVER_RATE,
+            mutation_rate=mutation_rate,
+            X=X,
+            y=y,
+            n_classes=n_classes,
+            elite_size=ELITE_SIZE,
+            gap=GAP,
+            tournament_size=TOURNAMENT_SIZE,
+            max_generations=args.generations,
+            stagnation_limit=STAGNATION_LIMIT,
+            logger=logger,
+            experiment_id=exp_id,
+            random_state=42 + exp_id,
+        )
+
+        best_genes, best_fitness, best_f1 = ga.evolve()
+        elapsed = time.time() - start
+
+        selected = [feature_names[i] for i, g in enumerate(best_genes) if g == 1]
+        results.append({
+            "experimento": exp_id,
+            "best_fitness": best_fitness,
+            "best_f1": best_f1,
+            "n_atributos": len(selected),
+            "atributos": selected,
+            "tempo_s": elapsed,
+        })
+
+        print(f"  Melhor fitness: {best_fitness:.4f} | "
+              f"F1-Score: {best_f1:.4f} | "
+              f"Atributos ativos: {len(selected)}/{L} | "
+              f"Tempo: {elapsed:.1f}s\n")
+
+    total_elapsed = time.time() - overall_start
+
+    # ------------------------------------------------------------------
+    # 4) Resumo agregado
+    # ------------------------------------------------------------------
+    fitnesses = np.array([r["best_fitness"] for r in results])
+    f1s = np.array([r["best_f1"] for r in results])
+    nfeats = np.array([r["n_atributos"] for r in results])
+
+    print("=" * 70)
+    print("  RESUMO DOS EXPERIMENTOS")
+    print("=" * 70)
+    print(f"Fitness médio:  {fitnesses.mean():.4f} ± {fitnesses.std():.4f}")
+    print(f"F1-Score médio: {f1s.mean():.4f} ± {f1s.std():.4f}")
+    print(f"Atributos selecionados (média): {nfeats.mean():.1f} de {L}")
+    print(f"Tempo total: {total_elapsed/60:.1f} min")
+
+    best_idx = int(np.argmax(fitnesses))
+    best = results[best_idx]
+    print()
+    print(f"Melhor experimento: #{best['experimento']}")
+    print(f"  Fitness:  {best['best_fitness']:.4f}")
+    print(f"  F1-Score: {best['best_f1']:.4f}")
+    print(f"  Atributos selecionados ({best['n_atributos']}):")
+    for feat in best["atributos"]:
+        print(f"    - {feat}")
+
+    # ------------------------------------------------------------------
+    # 5) Gráficos
+    # ------------------------------------------------------------------
+    print("\n[INFO] Gerando gráficos...")
     plot_metrics(log_dir=LOG_DIR, output_dir=PLOT_DIR)
-    print(f"[SUCESSO] Gráficos guardados na pasta /{PLOT_DIR}.")
-    print("Processo finalizado.")
+    print(f"[OK] Gráficos salvos em /{PLOT_DIR}/")
+    print("\nProcesso finalizado.")
+
 
 if __name__ == "__main__":
     main()

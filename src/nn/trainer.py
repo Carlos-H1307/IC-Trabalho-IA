@@ -1,37 +1,78 @@
+import numpy as np
+from sklearn.metrics import f1_score
 from sklearn.model_selection import train_test_split
+from tensorflow.keras.callbacks import EarlyStopping
+
 from nn.model import create_mlp_model
 
-def train_and_evaluate_nn(X_filtered, y, chromosome_id=None, logger=None, generation=None):
+# Configurações de treinamento (compromisso entre tempo de execução e qualidade)
+DEFAULT_EPOCHS = 30
+DEFAULT_BATCH_SIZE = 64
+DEFAULT_PATIENCE = 5  # paciência para early stopping no conjunto de validação
+
+
+def _split_70_15_15(X, y, random_state):
+    """Divide os dados em 70% treino / 15% validação / 15% teste de forma estratificada."""
+    X_train, X_temp, y_train, y_temp = train_test_split(
+        X, y, test_size=0.30, random_state=random_state, stratify=y
+    )
+    X_val, X_test, y_val, y_test = train_test_split(
+        X_temp, y_temp, test_size=0.50, random_state=random_state, stratify=y_temp
+    )
+    return X_train, X_val, X_test, y_train, y_val, y_test
+
+
+def train_and_evaluate_nn(
+    X_filtered,
+    y,
+    n_classes,
+    chromosome_id=None,
+    logger=None,
+    generation=None,
+    random_state=42,
+    epochs=DEFAULT_EPOCHS,
+    batch_size=DEFAULT_BATCH_SIZE,
+    patience=DEFAULT_PATIENCE,
+):
     """
-    Recebe os dados filtrados pelo cromossomo, treina a rede MLP e 
-    retorna a acurácia de validação como fitness.
+    Treina a MLP nos atributos selecionados e retorna o F1-Score no conjunto de teste.
+
+    A divisão segue o procedimento experimental: 70% treino / 15% validação / 15% teste.
+    O conjunto de validação é usado pelo EarlyStopping para escolher a melhor configuração
+    da rede (menor erro de validação). O F1-Score final é medido no conjunto de teste,
+    em dados não vistos durante o treino nem durante a seleção do melhor modelo.
     """
-    # 1. Divisão dos dados: 80% para treino, 20% para validação cruzada
-    # O random_state fixo garante que todos os cromossomos sejam testados na mesma divisão
-    X_train, X_val, y_train, y_val = train_test_split(X_filtered, y, test_size=0.2, random_state=42)
-    
-    # 2. Inicialização do Modelo
+    X_train, X_val, X_test, y_train, y_val, y_test = _split_70_15_15(
+        X_filtered, y, random_state=random_state
+    )
+
     input_dim = X_train.shape[1]
-    model = create_mlp_model(input_dim)
-    
-    # 3. Treinamento
-    # Mantemos o número de épocas baixo (ex: 10 a 20) para que o GA não demore dias para rodar.
-    # verbose=0 mantém o terminal limpo durante as centenas de treinamentos.
-    EPOCHS = 15
+    model = create_mlp_model(input_dim, n_classes=n_classes, learning_rate=0.001)
+
+    early_stop = EarlyStopping(
+        monitor="val_loss",
+        patience=patience,
+        restore_best_weights=True,
+        verbose=0,
+    )
+
     history = model.fit(
         X_train, y_train,
-        epochs=EPOCHS,
-        batch_size=32,
         validation_data=(X_val, y_val),
-        verbose=0 
+        epochs=epochs,
+        batch_size=batch_size,
+        callbacks=[early_stop],
+        verbose=0,
     )
-    
-    # 4. Extração de Métricas (Pegamos os valores da última época)
-    val_accuracy = history.history['val_accuracy'][-1]
-    val_loss = history.history['val_loss'][-1]
-    train_loss = history.history['loss'][-1]
-    
-    # 5. Telemetria e Logs
+
+    # Avaliação no conjunto de teste
+    y_pred = np.argmax(model.predict(X_test, verbose=0), axis=1)
+    f1 = f1_score(y_test, y_pred, average="macro")
+
+    train_loss = float(history.history["loss"][-1])
+    val_loss = float(history.history["val_loss"][-1])
+    val_accuracy = float(history.history["val_accuracy"][-1])
+
     if logger:
         logger.log_nn_metrics(
             chromosome_id=chromosome_id,
@@ -39,8 +80,9 @@ def train_and_evaluate_nn(X_filtered, y, chromosome_id=None, logger=None, genera
             train_loss=train_loss,
             val_loss=val_loss,
             val_accuracy=val_accuracy,
-            epochs=EPOCHS,
-            num_features_used=input_dim
+            f1_score=f1,
+            epochs=len(history.history["loss"]),
+            num_features_used=input_dim,
         )
-        
-    return val_accuracy
+
+    return f1

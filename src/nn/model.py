@@ -1,29 +1,30 @@
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout
+from tensorflow.keras.layers import Dense, Input
+from tensorflow.keras.optimizers import Adam
 
-def create_mlp_model(input_dim):
+
+def create_mlp_model(input_dim, n_classes, learning_rate=0.001):
     """
-    Cria uma arquitetura MLP (Multilayer Perceptron) para classificação binária.
-    A camada de entrada adapta-se ao número de colunas selecionadas pelo GA.
+    Cria a arquitetura MLP especificada no trabalho:
+      - Camada de entrada: input_dim neurônios (atributos selecionados pelo GA)
+      - 1ª camada oculta: 32 neurônios, ativação ReLU
+      - 2ª camada oculta: 16 neurônios, ativação ReLU
+      - Camada de saída: n_classes neurônios, ativação Softmax
+
+    Treinamento: Backpropagation com otimizador Adam (lr=0.001).
+    Loss: sparse_categorical_crossentropy (y como inteiros, não one-hot).
     """
     model = Sequential([
-        # Camada oculta 1: 16 neurônios com ativação ReLU
-        Dense(16, activation='relu', input_dim=input_dim),
-        Dropout(0.2), # Previne overfitting "desligando" aleatoriamente 20% dos neurônios
-        
-        # Camada oculta 2: 8 neurônios
-        Dense(8, activation='relu'),
-        
-        # Camada de saída: 1 neurônio com Sigmoid para retornar probabilidade (0 ou 1)
-        # Ideal para o diagnóstico de câncer de mama (Benigno/Maligno)
-        Dense(1, activation='sigmoid')
+        Input(shape=(input_dim,)),
+        Dense(32, activation="relu"),
+        Dense(16, activation="relu"),
+        Dense(n_classes, activation="softmax"),
     ])
-    
-    # Compilação do modelo focada em classificação binária
+
     model.compile(
-        optimizer='adam', 
-        loss='binary_crossentropy', 
-        metrics=['accuracy']
+        optimizer=Adam(learning_rate=learning_rate),
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
     )
-    
+
     return model
