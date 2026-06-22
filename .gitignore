@@ -68,3 +68,11 @@ Thumbs.db
 
 # Node (se usar alguma ferramenta)
 node_modules/
+
+# AI agents
+CLAUDE.md
+AGENTS.md
+.cursor/
+
+# Datasets (provided separately via Teams)
+data/
