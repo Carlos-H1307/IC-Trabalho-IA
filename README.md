@@ -19,15 +19,42 @@ Fitness = 0,9 × F1-Score + 0,1 × (1 − Ns/Nt)
 
 ## Setup
 
-O projeto usa [uv](https://docs.astral.sh/uv/) para gerenciamento de dependências.
+O projeto usa [uv](https://docs.astral.sh/uv/) para gerenciamento de dependências e ambiente virtual.
+
+### 1. Instalar o uv
+
+**macOS / Linux**
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+**Windows (PowerShell)**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Após a instalação, reinicie o terminal para que o comando `uv` fique disponível.
+
+### 2. Clonar o repositório
+
+```bash
+git clone https://github.com/Carlos-H1307/IC-Trabalho-IA.git
+cd IC-Trabalho-IA
+```
+
+### 3. Instalar as dependências
 
 ```bash
 uv sync
 ```
 
-## Executar
+Isso cria automaticamente um ambiente virtual em `.venv/` e instala todas as dependências declaradas no `pyproject.toml`.
 
-Coloque a base de dados em `files/raw/` e execute:
+### 4. Adicionar a base de dados
+
+Coloque o arquivo CSV da base de dados em `files/raw/`. A pasta está no `.gitignore` e não é versionada — o dataset é distribuído separadamente pelo professor via Teams.
+
+## Executar
 
 ```bash
 uv run python src/main.py
