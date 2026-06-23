@@ -51,6 +51,7 @@ plots/
 arquivos/
 *.csv
 !requirements.txt
+!reports/*.csv
 files/
 
 # Variáveis de Ambiente
