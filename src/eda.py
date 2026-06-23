@@ -17,7 +17,6 @@ Saídas (em `reports/`):
 
 import os
 import sys
-from io import StringIO
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -71,8 +70,8 @@ def _plot_missingness(df, output_path, top_n=30):
         return
 
     fig, ax = plt.subplots(figsize=(10, max(4, 0.3 * len(missing))))
-    bars = ax.barh(missing.index[::-1], (missing.values * 100)[::-1],
-                   color=["#d62728" if v > MAX_MISSING_RATIO else "#1f77b4" for v in missing.values[::-1]])
+    ax.barh(missing.index[::-1], (missing.values * 100)[::-1],
+            color=["#d62728" if v > MAX_MISSING_RATIO else "#1f77b4" for v in missing.values[::-1]])
     ax.set_xlabel("% de valores ausentes")
     ax.set_title(f"Top {len(missing)} colunas com valores ausentes", fontsize=14, pad=12)
     ax.axvline(MAX_MISSING_RATIO * 100, color="red", linestyle="--", alpha=0.6,
@@ -192,7 +191,7 @@ def _summary_lines(df):
         sexo_vals = df["SEXO"].value_counts().to_dict()
         lines.append(f"  Distribuição de SEXO: {sexo_vals}")
         if df["SEXO"].nunique() == 1:
-            lines.append(f"    >> SEXO é constante (todas as pacientes femininas) — coluna descartada")
+            lines.append("    >> SEXO é constante (todas as pacientes femininas) — coluna descartada")
     if "DTOBITO" in df.columns and "DTNASC" in df.columns:
         try:
             obito_year = df["DTOBITO"].astype(str).str.zfill(8).str[-4:].astype(int)

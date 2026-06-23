@@ -86,7 +86,3 @@ def linear_scale_population(population):
     else:
         for c in population:
             c.scaled_fitness = float((c.fitness - f_min) / (f_max - f_min))
-
-
-# Mantém o nome antigo como alias para retro-compatibilidade
-calculate_fitness = evaluate_chromosome

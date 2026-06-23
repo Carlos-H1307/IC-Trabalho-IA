@@ -375,7 +375,7 @@ def load_and_preprocess_data(data_path, sample_size=None, random_state=42, verbo
         print(f"[INFO] Total de registros finais: {len(X)}")
         print(f"[INFO] Classes: {list(target_encoder.classes_)} -> {list(range(n_classes))}")
         class_counts = np.bincount(y)
-        print(f"[INFO] Distribuição: " +
+        print("[INFO] Distribuição: " +
               ", ".join(f"{c}={n} ({n/len(y)*100:.1f}%)"
                         for c, n in zip(target_encoder.classes_, class_counts)))
 
