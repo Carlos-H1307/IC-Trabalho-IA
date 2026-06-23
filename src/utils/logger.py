@@ -25,7 +25,8 @@ class MetricsLogger:
         "loss_treino",
         "loss_validacao",
         "acuracia_validacao",
-        "f1_score",
+        "f1_score",        # F1 weighted (fitness primário)
+        "f1_macro",        # F1 macro (para diagnóstico de viés)
         "epocas",
         "num_atributos_usados",
     ]
@@ -76,6 +77,7 @@ class MetricsLogger:
         val_loss,
         val_accuracy,
         f1_score,
+        f1_macro,
         epochs,
         num_features_used,
     ):
@@ -87,6 +89,7 @@ class MetricsLogger:
                 val_loss,
                 val_accuracy,
                 f1_score,
+                f1_macro,
                 epochs,
                 num_features_used,
             ])

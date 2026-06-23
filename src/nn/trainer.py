@@ -66,8 +66,14 @@ def train_and_evaluate_nn(
     )
 
     # Avaliação no conjunto de teste
+    # F1 weighted: pondera o F1 de cada classe pelo seu suporte real.
+    # Para classes desbalanceadas (62/20/18), é a métrica que reflete o
+    # desempenho esperado na população — usada como fitness primário.
+    # F1 macro: trata as três classes igualmente (sem ponderação) — útil
+    # para diagnóstico de viés, registrado em log para análise comparativa.
     y_pred = np.argmax(model.predict(X_test, verbose=0), axis=1)
-    f1 = f1_score(y_test, y_pred, average="macro")
+    f1_weighted = f1_score(y_test, y_pred, average="weighted", zero_division=0)
+    f1_macro = f1_score(y_test, y_pred, average="macro", zero_division=0)
 
     train_loss = float(history.history["loss"][-1])
     val_loss = float(history.history["val_loss"][-1])
@@ -80,9 +86,10 @@ def train_and_evaluate_nn(
             train_loss=train_loss,
             val_loss=val_loss,
             val_accuracy=val_accuracy,
-            f1_score=f1,
+            f1_score=f1_weighted,
+            f1_macro=f1_macro,
             epochs=len(history.history["loss"]),
             num_features_used=input_dim,
         )
 
-    return f1
+    return f1_weighted

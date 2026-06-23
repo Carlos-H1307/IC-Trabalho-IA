@@ -7,6 +7,8 @@ from sklearn.preprocessing import LabelEncoder
 MAX_MISSING_RATIO = 0.5
 # Limite de cardinalidade para colunas categóricas (acima disso, a coluna é descartada)
 MAX_CATEGORICAL_CARDINALITY = 50
+# Limite de proporção do código 9 ("ignorado" no DATASUS) para descartar coluna
+MAX_IGNORADO_RATIO = 0.8
 # Nome esperado da coluna alvo
 TARGET_COLUMN = "label_cid"
 
@@ -30,6 +32,22 @@ TARGET_LEAK_COLUMNS = {
     "ATESTANTE",
 }
 
+# Colunas categóricas do SIM/DATASUS em que o código 9 significa "ignorado"
+# (e não uma categoria válida). Para essas, se a proporção de 9s for muito
+# alta, a coluna é descartada por falta de poder discriminativo.
+IGNORADO_CODE_COLUMNS = {
+    "RACACOR",
+    "ESTCIV",
+    "ESC",
+    "ESC2010",
+    "ASSISTMED",
+    "EXAME",
+    "CIRURGIA",
+    "NECROPSIA",
+    "LOCOCOR",
+    "ESCFALAGR1",
+}
+
 
 def _load_raw(data_path):
     """Lê o arquivo bruto, suportando tanto .csv quanto .xlsx."""
@@ -42,11 +60,74 @@ def _load_raw(data_path):
         raise ValueError(f"Formato de arquivo não suportado: {ext}")
 
 
+def _drop_duplicates(df):
+    """Remove linhas duplicadas exatas."""
+    before = len(df)
+    df = df.drop_duplicates().reset_index(drop=True)
+    return df, before - len(df)
+
+
+def _drop_constant_columns(df):
+    """Remove colunas em que todos os valores são iguais (variância zero).
+    Inclui colunas inteiramente nulas, que também não trazem informação.
+    """
+    constant_cols = []
+    for col in df.columns:
+        # nunique(dropna=False) considera NaN como um valor possível
+        if df[col].nunique(dropna=False) <= 1:
+            constant_cols.append(col)
+    return df.drop(columns=constant_cols), constant_cols
+
+
+def _drop_ignorado_dominated_columns(df, threshold=MAX_IGNORADO_RATIO):
+    """
+    Para colunas conhecidas do DATASUS em que '9' significa 'ignorado',
+    descarta aquelas onde a proporção de 9s ultrapassa o limite — não há
+    informação útil para discriminar classes.
+    """
+    dropped = []
+    for col in IGNORADO_CODE_COLUMNS:
+        if col not in df.columns:
+            continue
+        ignorado_ratio = (df[col] == 9).mean()
+        if ignorado_ratio > threshold:
+            dropped.append((col, float(ignorado_ratio)))
+            df = df.drop(columns=col)
+    return df, dropped
+
+
 def _drop_high_missing_columns(df, threshold=MAX_MISSING_RATIO):
     """Remove colunas com proporção de valores ausentes acima do limite."""
     missing_ratio = df.isnull().mean()
     cols_to_drop = missing_ratio[missing_ratio > threshold].index.tolist()
     return df.drop(columns=cols_to_drop), cols_to_drop
+
+
+def _check_date_consistency(df):
+    """
+    Verifica inconsistências em colunas de data (DTNASC vs DTOBITO).
+    O SIM codifica datas como inteiros DDMMYYYY. Retorna a quantidade de
+    registros com data de nascimento posterior à data do óbito.
+    Não remove nada — apenas relata.
+    """
+    if "DTOBITO" not in df.columns or "DTNASC" not in df.columns:
+        return 0
+    try:
+        obito_year = df["DTOBITO"].astype(str).str.zfill(8).str[-4:].astype(int)
+        nasc_year = df["DTNASC"].fillna(0).astype(np.int64).astype(str).str.zfill(8).str[-4:].astype(int)
+        inconsistent = ((nasc_year > obito_year) & (nasc_year > 1900)).sum()
+        return int(inconsistent)
+    except Exception:
+        return 0
+
+
+def _check_age_outliers(df):
+    """Verifica registros com idade fora do intervalo plausível [0, 120]."""
+    if "idade_obito_anos" not in df.columns:
+        return 0
+    ages = df["idade_obito_anos"]
+    invalid = ((ages < 0) | (ages > 120)).sum()
+    return int(invalid)
 
 
 def _encode_categoricals(df):
@@ -92,23 +173,23 @@ def _min_max_normalize(X):
     return X_norm
 
 
-def load_and_preprocess_data(data_path, sample_size=None, random_state=42):
+def load_and_preprocess_data(data_path, sample_size=None, random_state=42, verbose=True):
     """
     Pipeline de carregamento e pré-processamento da base de câncer do colo do útero.
 
-    Etapas (seguindo a especificação do trabalho):
+    Etapas:
       1. Leitura do arquivo
-      2. Remoção de registros inconsistentes (linhas sem o alvo)
-      3. Remoção de colunas com alta proporção de valores ausentes
-      4. Codificação de atributos categóricos para valores numéricos
-      5. Imputação de valores numéricos ausentes pela mediana
-      6. (Opcional) amostragem estratificada para reduzir custo computacional
-      7. Normalização linear Min-Max no intervalo [0, 1]
-
-    Args:
-        data_path: caminho para o arquivo da base (CSV ou XLSX).
-        sample_size: se informado, faz amostragem estratificada para esse tamanho.
-        random_state: semente para a amostragem.
+      2. Remoção de registros sem alvo (inconsistência crítica)
+      3. Remoção de duplicatas exatas
+      4. Checagens de inconsistência (datas, idade) — apenas relata
+      5. Remoção de colunas de vazamento de alvo
+      6. Remoção de colunas constantes (variância zero)
+      7. Remoção de colunas dominadas por '9' (código 'ignorado' do DATASUS)
+      8. Remoção de colunas com alta proporção de valores ausentes
+      9. Codificação de atributos categóricos (LabelEncoder); descarte por alta cardinalidade
+      10. Imputação de valores numéricos ausentes pela mediana
+      11. (Opcional) amostragem estratificada
+      12. Normalização linear Min-Max em [0, 1]
 
     Retorna:
         X (np.ndarray): matriz de atributos normalizada
@@ -117,6 +198,8 @@ def load_and_preprocess_data(data_path, sample_size=None, random_state=42):
         n_classes (int): quantidade de classes distintas no alvo
     """
     df = _load_raw(data_path)
+    n_raw = len(df)
+    cols_raw = list(df.columns)
 
     if TARGET_COLUMN not in df.columns:
         raise ValueError(
@@ -124,27 +207,41 @@ def load_and_preprocess_data(data_path, sample_size=None, random_state=42):
             f"Primeiras colunas disponíveis: {df.columns.tolist()[:10]}"
         )
 
-    # 1) Remove registros sem alvo (inconsistentes)
+    # 1) Remove registros sem alvo
     df = df.dropna(subset=[TARGET_COLUMN])
+    n_no_target_removed = n_raw - len(df)
 
-    # Separa o alvo antes de tocar no restante
+    # 2) Remove duplicatas exatas
+    df, n_duplicates_removed = _drop_duplicates(df)
+
+    # Checagens de consistência (informativas)
+    n_age_outliers = _check_age_outliers(df)
+    n_date_inconsistent = _check_date_consistency(df)
+
+    # Separa o alvo
     y_raw = df[TARGET_COLUMN].astype(str).values
     df = df.drop(columns=[TARGET_COLUMN])
 
-    # 2) Remove colunas que constituem vazamento direto do alvo
+    # 3) Remove colunas de vazamento de alvo
     leak_cols = [c for c in TARGET_LEAK_COLUMNS if c in df.columns]
     df = df.drop(columns=leak_cols)
 
-    # 3) Remove colunas com muitos valores ausentes
+    # 4) Remove colunas constantes
+    df, constant_cols = _drop_constant_columns(df)
+
+    # 5) Remove colunas dominadas por código "ignorado" (9)
+    df, ignorado_dropped = _drop_ignorado_dominated_columns(df)
+
+    # 6) Remove colunas com muitos NaN
     df, dropped_missing = _drop_high_missing_columns(df)
 
-    # 3) Codifica categóricas / descarta colunas de alta cardinalidade
+    # 7) Codifica categóricas / descarta colunas de alta cardinalidade
     df, dropped_cardinality = _encode_categoricals(df)
 
-    # 4) Imputa valores numéricos ausentes
+    # 8) Imputa valores numéricos ausentes
     df = _impute_numeric(df)
 
-    # 5) Codifica o alvo para inteiros (0..n_classes-1)
+    # 9) Codifica o alvo
     target_encoder = LabelEncoder()
     y = target_encoder.fit_transform(y_raw)
     n_classes = len(target_encoder.classes_)
@@ -152,7 +249,7 @@ def load_and_preprocess_data(data_path, sample_size=None, random_state=42):
     feature_names = df.columns.tolist()
     X = df.values
 
-    # 6) Amostragem estratificada opcional para tornar o GA tratável
+    # 10) Amostragem estratificada opcional
     if sample_size is not None and sample_size < len(X):
         rng = np.random.default_rng(random_state)
         idx_per_class = []
@@ -166,14 +263,28 @@ def load_and_preprocess_data(data_path, sample_size=None, random_state=42):
         X = X[idx]
         y = y[idx]
 
-    # 7) Normalização Min-Max
+    # 11) Normalização Min-Max
     X = _min_max_normalize(X)
 
-    print(f"[INFO] Colunas removidas por vazamento de alvo: {len(leak_cols)}")
-    print(f"[INFO] Colunas removidas por excesso de NaN: {len(dropped_missing)}")
-    print(f"[INFO] Colunas removidas por alta cardinalidade: {len(dropped_cardinality)}")
-    print(f"[INFO] Total de atributos finais: {len(feature_names)}")
-    print(f"[INFO] Total de registros: {len(X)}")
-    print(f"[INFO] Classes: {list(target_encoder.classes_)} -> {list(range(n_classes))}")
+    if verbose:
+        print(f"[INFO] Linhas originais: {n_raw}")
+        print(f"[INFO] Linhas sem alvo removidas: {n_no_target_removed}")
+        print(f"[INFO] Duplicatas exatas removidas: {n_duplicates_removed}")
+        print(f"[INFO] Idades fora de [0, 120]: {n_age_outliers}")
+        print(f"[INFO] Datas inconsistentes (nasc > óbito): {n_date_inconsistent}")
+        print(f"[INFO] Colunas originais: {len(cols_raw)}")
+        print(f"[INFO] Colunas removidas por vazamento de alvo: {len(leak_cols)}")
+        print(f"[INFO] Colunas removidas por variância zero: {len(constant_cols)} {constant_cols}")
+        print(f"[INFO] Colunas removidas por 'ignorado' > {int(MAX_IGNORADO_RATIO*100)}%: "
+              f"{[(c, f'{r*100:.0f}%') for c, r in ignorado_dropped]}")
+        print(f"[INFO] Colunas removidas por excesso de NaN: {len(dropped_missing)}")
+        print(f"[INFO] Colunas removidas por alta cardinalidade: {len(dropped_cardinality)}")
+        print(f"[INFO] Total de atributos finais: {len(feature_names)}")
+        print(f"[INFO] Total de registros finais: {len(X)}")
+        print(f"[INFO] Classes: {list(target_encoder.classes_)} -> {list(range(n_classes))}")
+        class_counts = np.bincount(y)
+        print(f"[INFO] Distribuição: " +
+              ", ".join(f"{c}={n} ({n/len(y)*100:.1f}%)"
+                        for c, n in zip(target_encoder.classes_, class_counts)))
 
     return X, y, feature_names, n_classes
