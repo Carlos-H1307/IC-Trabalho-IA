@@ -9,6 +9,10 @@ MAX_MISSING_RATIO = 0.5
 MAX_CATEGORICAL_CARDINALITY = 50
 # Limite de proporção do código 9 ("ignorado" no DATASUS) para descartar coluna
 MAX_IGNORADO_RATIO = 0.8
+# Limite de quase-constância: se a moda concentra mais do que isto, descarta
+MAX_MODE_RATIO = 0.95
+# Limite de correlação absoluta para considerar duas colunas redundantes
+MAX_CORRELATION = 0.95
 # Nome esperado da coluna alvo
 TARGET_COLUMN = "label_cid"
 
@@ -96,6 +100,76 @@ def _drop_ignorado_dominated_columns(df, threshold=MAX_IGNORADO_RATIO):
     return df, dropped
 
 
+def _replace_ignorado_with_nan(df):
+    """
+    Para colunas do DATASUS em que '9' significa 'ignorado' e que NÃO foram
+    descartadas (proporção de 9 dentro do tolerável), converte os 9s para
+    NaN para que sejam tratados como valores ausentes pela imputação.
+
+    Sem este passo, o LabelEncoder/imputação trataria 9 como uma categoria
+    válida, misturando 'sem informação' com categorias reais.
+    """
+    transformed = {}
+    for col in IGNORADO_CODE_COLUMNS:
+        if col not in df.columns:
+            continue
+        n_replaced = int((df[col] == 9).sum())
+        if n_replaced > 0:
+            df[col] = df[col].replace(9, np.nan)
+            transformed[col] = n_replaced
+    return df, transformed
+
+
+def _drop_near_constant_columns(df, threshold=MAX_MODE_RATIO):
+    """
+    Remove colunas onde um único valor concentra mais do que `threshold`
+    dos registros. Estas colunas têm variância pequena demais para serem
+    informativas para a MLP.
+    """
+    dropped = []
+    for col in df.columns:
+        counts = df[col].value_counts(dropna=False)
+        if len(counts) == 0:
+            continue
+        mode_ratio = counts.iloc[0] / len(df)
+        if mode_ratio > threshold:
+            dropped.append((col, float(mode_ratio)))
+            df = df.drop(columns=col)
+    return df, dropped
+
+
+def _drop_highly_correlated_columns(df, threshold=MAX_CORRELATION):
+    """
+    Detecta pares de colunas numéricas com |correlação| acima do limite e
+    descarta uma das duas (a segunda na ordem das colunas) para reduzir
+    redundância. A imputação por mediana é aplicada localmente apenas para
+    o cálculo da correlação — os dados originais não são modificados.
+    """
+    numeric = df.select_dtypes(include=[np.number])
+    if numeric.shape[1] < 2:
+        return df, []
+
+    corr = numeric.fillna(numeric.median(numeric_only=True)).corr().abs()
+    cols = list(corr.columns)
+    drop_set = set()
+    pairs_dropped = []
+
+    for i, col1 in enumerate(cols):
+        if col1 in drop_set:
+            continue
+        for col2 in cols[i + 1:]:
+            if col2 in drop_set:
+                continue
+            r = corr.loc[col1, col2]
+            if r >= threshold:
+                drop_set.add(col2)
+                pairs_dropped.append((col1, col2, float(r)))
+
+    if drop_set:
+        df = df.drop(columns=list(drop_set))
+    return df, pairs_dropped
+
+
 def _drop_high_missing_columns(df, threshold=MAX_MISSING_RATIO):
     """Remove colunas com proporção de valores ausentes acima do limite."""
     missing_ratio = df.isnull().mean()
@@ -178,18 +252,21 @@ def load_and_preprocess_data(data_path, sample_size=None, random_state=42, verbo
     Pipeline de carregamento e pré-processamento da base de câncer do colo do útero.
 
     Etapas:
-      1. Leitura do arquivo
-      2. Remoção de registros sem alvo (inconsistência crítica)
-      3. Remoção de duplicatas exatas
-      4. Checagens de inconsistência (datas, idade) — apenas relata
-      5. Remoção de colunas de vazamento de alvo
-      6. Remoção de colunas constantes (variância zero)
-      7. Remoção de colunas dominadas por '9' (código 'ignorado' do DATASUS)
-      8. Remoção de colunas com alta proporção de valores ausentes
-      9. Codificação de atributos categóricos (LabelEncoder); descarte por alta cardinalidade
-      10. Imputação de valores numéricos ausentes pela mediana
-      11. (Opcional) amostragem estratificada
-      12. Normalização linear Min-Max em [0, 1]
+      1.  Leitura do arquivo
+      2.  Remoção de registros sem alvo
+      3.  Remoção de duplicatas exatas
+      4.  Checagens de inconsistência (datas, idade) — apenas relata
+      5.  Remoção de colunas de vazamento de alvo
+      6.  Remoção de colunas constantes (variância zero)
+      7.  Remoção de colunas dominadas por '9' (>80% 'ignorado' do DATASUS)
+      8.  Remoção de colunas quase-constantes (moda > 95%)
+      9.  Conversão de '9' residual ('ignorado') para NaN
+      10. Remoção de colunas com alta proporção de valores ausentes
+      11. Remoção de colunas numéricas redundantes (|corr| > 0.95)
+      12. Codificação de atributos categóricos (LabelEncoder); descarte por alta cardinalidade
+      13. Imputação de valores numéricos ausentes pela mediana
+      14. (Opcional) amostragem estratificada
+      15. Normalização linear Min-Max em [0, 1]
 
     Retorna:
         X (np.ndarray): matriz de atributos normalizada
@@ -226,22 +303,31 @@ def load_and_preprocess_data(data_path, sample_size=None, random_state=42, verbo
     leak_cols = [c for c in TARGET_LEAK_COLUMNS if c in df.columns]
     df = df.drop(columns=leak_cols)
 
-    # 4) Remove colunas constantes
+    # 4) Remove colunas constantes (variância zero)
     df, constant_cols = _drop_constant_columns(df)
 
-    # 5) Remove colunas dominadas por código "ignorado" (9)
+    # 5) Remove colunas dominadas por código "ignorado" (9 > 80%)
     df, ignorado_dropped = _drop_ignorado_dominated_columns(df)
 
-    # 6) Remove colunas com muitos NaN
+    # 6) Remove colunas quase-constantes (moda > 95%)
+    df, near_constant_cols = _drop_near_constant_columns(df)
+
+    # 7) Converte código 9 ("ignorado") residual para NaN (será imputado)
+    df, ignorado_replaced = _replace_ignorado_with_nan(df)
+
+    # 8) Remove colunas com muitos NaN
     df, dropped_missing = _drop_high_missing_columns(df)
 
-    # 7) Codifica categóricas / descarta colunas de alta cardinalidade
+    # 9) Remove colunas numéricas redundantes (|corr| > 0.95)
+    df, corr_pairs_dropped = _drop_highly_correlated_columns(df)
+
+    # 10) Codifica categóricas / descarta colunas de alta cardinalidade
     df, dropped_cardinality = _encode_categoricals(df)
 
-    # 8) Imputa valores numéricos ausentes
+    # 11) Imputa valores numéricos ausentes
     df = _impute_numeric(df)
 
-    # 9) Codifica o alvo
+    # 12) Codifica o alvo
     target_encoder = LabelEncoder()
     y = target_encoder.fit_transform(y_raw)
     n_classes = len(target_encoder.classes_)
@@ -249,7 +335,7 @@ def load_and_preprocess_data(data_path, sample_size=None, random_state=42, verbo
     feature_names = df.columns.tolist()
     X = df.values
 
-    # 10) Amostragem estratificada opcional
+    # 13) Amostragem estratificada opcional
     if sample_size is not None and sample_size < len(X):
         rng = np.random.default_rng(random_state)
         idx_per_class = []
@@ -263,7 +349,7 @@ def load_and_preprocess_data(data_path, sample_size=None, random_state=42, verbo
         X = X[idx]
         y = y[idx]
 
-    # 11) Normalização Min-Max
+    # 14) Normalização Min-Max
     X = _min_max_normalize(X)
 
     if verbose:
@@ -277,8 +363,14 @@ def load_and_preprocess_data(data_path, sample_size=None, random_state=42, verbo
         print(f"[INFO] Colunas removidas por variância zero: {len(constant_cols)} {constant_cols}")
         print(f"[INFO] Colunas removidas por 'ignorado' > {int(MAX_IGNORADO_RATIO*100)}%: "
               f"{[(c, f'{r*100:.0f}%') for c, r in ignorado_dropped]}")
-        print(f"[INFO] Colunas removidas por excesso de NaN: {len(dropped_missing)}")
-        print(f"[INFO] Colunas removidas por alta cardinalidade: {len(dropped_cardinality)}")
+        print(f"[INFO] Colunas removidas por quase-constância (moda > {int(MAX_MODE_RATIO*100)}%): "
+              f"{[(c, f'{r*100:.1f}%') for c, r in near_constant_cols]}")
+        print(f"[INFO] '9' (ignorado) convertido para NaN em: "
+              f"{[(c, n) for c, n in ignorado_replaced.items()]}")
+        print(f"[INFO] Colunas removidas por excesso de NaN: {len(dropped_missing)} {dropped_missing}")
+        print(f"[INFO] Colunas removidas por correlação > {MAX_CORRELATION}: "
+              f"{[(a, b, f'{r:.3f}') for a, b, r in corr_pairs_dropped]}")
+        print(f"[INFO] Colunas removidas por alta cardinalidade: {len(dropped_cardinality)} {dropped_cardinality}")
         print(f"[INFO] Total de atributos finais: {len(feature_names)}")
         print(f"[INFO] Total de registros finais: {len(X)}")
         print(f"[INFO] Classes: {list(target_encoder.classes_)} -> {list(range(n_classes))}")

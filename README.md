@@ -258,81 +258,142 @@ diagnóstico da EDA):
 | Datas inconsistentes (nasc > óbito)       | **0**    | — |
 | Anos fora de [1996, 2025]                 | **0**    | — |
 | `SEXO ≠ 2` (não-feminino)                 | **0**    | — (esperado: câncer de útero) |
-| Coluna `SEXO` constante                   | **Sim**  | **Removida** — variância zero, sem poder discriminativo |
+| Coluna `SEXO` constante                   | **Sim**  | **Removida** — variância zero |
 | Coluna `TIPOBITO` constante               | **Sim**  | **Removida** — variância zero (sempre 2 = óbito não-fetal) |
-| Coluna `CAUSAMAT` 100% nula               | **Sim**  | Removida pelo filtro de NaN |
-| Coluna `NUDIASINF` 100% nula              | **Sim**  | Removida pelo filtro de NaN |
-| Código 9 ("ignorado") dominante em EXAME  | **94%**  | **Coluna removida** — sem poder discriminativo |
-| Código 9 ("ignorado") dominante em CIRURGIA | **95%** | **Coluna removida** — sem poder discriminativo |
+| Coluna `CAUSAMAT` 100% nula               | **Sim**  | Removida (variância zero) |
+| Coluna `NUDIASINF` 100% nula              | **Sim**  | Removida (variância zero) |
+| Código 9 ("ignorado") dominante em EXAME  | **94%**  | **Coluna removida** |
+| Código 9 ("ignorado") dominante em CIRURGIA | **95%** | **Coluna removida** |
+| Coluna `ESTABDESCR` 100% NaN              | **Sim**  | Removida por **quase-constância** (moda > 95%) |
+| Coluna `COMUNSVOIM` 96,5% NaN             | **Sim**  | Removida por **quase-constância** |
+| Coluna `ALTCAUSA` 100% NaN                | **Sim**  | Removida por **quase-constância** |
+| `CODMUNOCOR` ↔ `ocor_CODIGO_UF` (r=1,000) | **Sim**  | Uma coluna removida por **correlação alta** |
+| `CODMUNRES` ↔ `CODMUNOCOR` (r=0,989)      | **Sim**  | Uma coluna removida por **correlação alta** |
+| Código 9 residual em ASSISTMED (34%), NECROPSIA (29%), ESC (16%)... | **Sim** | **Convertido para NaN** e imputado pela mediana |
 
 ### Sobre o código 9 ("ignorado") do DATASUS
 
 No padrão SIM/DATASUS, o valor `9` em campos categóricos representa
 *"ignorado"* — informação ausente, não uma categoria real. Tratá-lo como
 categoria normal mistura ausência de informação com categorias válidas e
-introduz ruído. Decidimos:
+introduz ruído. O pipeline aplica duas estratégias:
 
-- Para colunas em `IGNORADO_CODE_COLUMNS` (RACACOR, ESTCIV, ESC, ASSISTMED,
-  EXAME, CIRURGIA, NECROPSIA, etc.) onde **mais de 80%** dos valores são 9,
-  a coluna é descartada (não há sinal útil).
-- Para as demais (proporção menor de 9s), o 9 é mantido como categoria
-  separada no `LabelEncoder`. A MLP pode aprender que "ignorado" é uma
-  classe à parte.
+1. **Descarte por dominância (etapa 7)**: para colunas em
+   `IGNORADO_CODE_COLUMNS` (RACACOR, ESTCIV, ESC, ASSISTMED, EXAME, CIRURGIA,
+   NECROPSIA, etc.) onde **mais de 80%** dos valores são 9, a coluna é
+   descartada inteira — não há sinal útil. Aplicado a `EXAME` (94%) e
+   `CIRURGIA` (95%).
+2. **Conversão para NaN (etapa 9)**: para as colunas que sobreviveram à
+   etapa anterior, todo valor 9 é substituído por NaN antes da imputação.
+   Isso evita que o LabelEncoder/median fitting trate "ignorado" como uma
+   categoria válida. Aplicado a 8 colunas, com ~155 mil substituições:
+   ASSISTMED (50k), NECROPSIA (43k), ESC (23k), ESTCIV (15k), ESC2010 (13k),
+   ESCFALAGR1 (11k), RACACOR (5k), LOCOCOR (46).
 
-Limiar 80% é um compromisso entre rigor (todo 9 deveria virar NaN) e
-praticidade (descobrir caso-a-caso o significado de cada 9 exigiria conhecer
-o dicionário completo do SIM).
+### Quase-constância (moda > 95%)
+
+Mesmo quando uma coluna não é tecnicamente "constante" (variância zero),
+se um único valor concentra mais de **95%** dos registros, ela tem variância
+pequena demais para a MLP aprender padrões úteis. O detector
+(`_drop_near_constant_columns`) captura colunas que escapariam dos filtros
+de "variância zero" e "alto NaN" — por exemplo, colunas com mistura de NaN
++ um único valor real.
+
+### Correlação alta (|r| > 0,95)
+
+Pares de colunas numéricas com correlação absoluta acima de 0,95 são
+redundantes. O detector (`_drop_highly_correlated_columns`) calcula a matriz
+de correlação (com imputação local por mediana só para o cálculo) e remove
+**a segunda coluna** de cada par. Pares descobertos na base:
+
+| Par                                       | r     | Mantida | Removida |
+|-------------------------------------------|-------|---------|----------|
+| `CODMUNRES` ↔ `CODMUNOCOR`                | 0,989 | CODMUNRES | CODMUNOCOR |
+| `CODMUNRES` ↔ `ocor_CODIGO_UF`            | 0,989 | CODMUNRES | ocor_CODIGO_UF |
+
+A explicação geográfica é direta: a grande maioria dos óbitos ocorre no
+mesmo município (e portanto UF) de residência. Manter as três colunas
+seria redundância pura.
+
+### Por que não tratar outliers nas numéricas
+
+A auditoria detectou apenas **7 outliers** em `idade_obito_anos` (1,5×IQR),
+todos no intervalo [11–13] ou [111–114] — valores plausíveis para casos
+médicos extremos. Outliers detectados em colunas como `CODMUNRES`,
+`CODESTAB`, `OCUP` não são outliers reais: são **códigos categóricos
+disfarçados de números** (códigos de município, IDs de estabelecimento,
+códigos especiais de ocupação). Tratá-los com IQR distorceria o significado
+sem ganho informacional. A normalização Min-Max já comprime tudo para [0,1].
 
 ---
 
 ## Pipeline de limpeza
 
-O pré-processamento (`src/data_loader.py`) é determinístico e segue 11 etapas
+O pré-processamento (`src/data_loader.py`) é determinístico e segue 15 etapas
 **nesta ordem**:
 
-| # | Etapa                                              | Heurística                              |
-|---|----------------------------------------------------|-----------------------------------------|
-| 1 | Leitura do arquivo (XLSX/CSV)                      | extensão do arquivo                     |
-| 2 | Remoção de registros sem alvo                      | `dropna(subset=["label_cid"])`          |
-| 3 | Remoção de duplicatas exatas                       | `drop_duplicates`                       |
-| 4 | Checagens de inconsistência (relatadas, não removem) | datas, idade — apenas auditoria      |
-| 5 | Remoção de colunas de **vazamento de alvo**        | lista `TARGET_LEAK_COLUMNS` (14 cols)   |
-| 6 | Remoção de **colunas constantes**                  | `nunique(dropna=False) ≤ 1`             |
-| 7 | Remoção de colunas dominadas por "ignorado" (9)    | `(col == 9).mean() > 0.80`              |
-| 8 | Remoção de colunas com excesso de NaN              | `> 50%` de valores nulos                |
-| 9 | Codificação de categóricas                          | `LabelEncoder` se `nunique ≤ 50`; descarte se acima |
-| 10| Imputação de NaN numéricos                          | mediana da coluna                       |
-| 11| Normalização **Min-Max linear**                     | `(x − x_min) / (x_max − x_min)` em [0,1] |
+| #  | Etapa                                                    | Heurística                              |
+|----|----------------------------------------------------------|-----------------------------------------|
+| 1  | Leitura do arquivo (XLSX/CSV)                            | extensão do arquivo                     |
+| 2  | Remoção de registros sem alvo                            | `dropna(subset=["label_cid"])`          |
+| 3  | Remoção de duplicatas exatas                             | `drop_duplicates`                       |
+| 4  | Checagens de inconsistência (auditoria, não remove)      | datas, idade                            |
+| 5  | Remoção de colunas de **vazamento de alvo**              | lista `TARGET_LEAK_COLUMNS` (14 cols)   |
+| 6  | Remoção de **colunas constantes** (variância zero)       | `nunique(dropna=False) ≤ 1`             |
+| 7  | Remoção de colunas dominadas por "ignorado" (9 > 80%)    | `(col == 9).mean() > 0.80`              |
+| 8  | Remoção de colunas **quase-constantes**                  | moda > 95% dos registros                |
+| 9  | Conversão de "9" residual ("ignorado") para NaN          | colunas em `IGNORADO_CODE_COLUMNS`      |
+| 10 | Remoção de colunas com excesso de NaN                    | `> 50%` de valores nulos                |
+| 11 | Remoção de colunas numéricas **redundantes**             | `|corr| > 0,95`                          |
+| 12 | Codificação de categóricas                                | `LabelEncoder` se `nunique ≤ 50`; descarte se acima |
+| 13 | Imputação de NaN numéricos                                | mediana da coluna                       |
+| 14 | Amostragem estratificada (opcional)                       | 3000 registros (padrão)                 |
+| 15 | Normalização **Min-Max linear**                           | `(x − x_min) / (x_max − x_min)` em [0,1] |
 
-Após o pipeline, **L ≈ 28 atributos** (de 50 originais) com **3000 registros**
+Após o pipeline, **L = 26 atributos** (de 50 originais) com **3000 registros**
 balanceados estratificadamente (padrão).
 
 ### Removidos por categoria (resumo)
 
-- **Vazamento de alvo** (10 colunas presentes na base curta):
-  `CAUSABAS`, `CAUSABAS_O`, `CB_PRE`, `causabas_categoria`,
-  `causabas_subcategoria`, `LINHAA`, `LINHAB`, `LINHAC`, `LINHAD`, `LINHAII`
-- **Variância zero** (4 colunas):
-  `TIPOBITO`, `SEXO`, `CAUSAMAT`, `NUDIASINF`
-- **Ignorado dominante** (2 colunas): `EXAME`, `CIRURGIA`
-- **NaN > 50%** (~6 colunas): `ALTCAUSA`, `ESTABDESCR`, `COMUNSVOIM`,
-  `SERIESCFAL`, `NUDIASOBCO`, `LINHAC`
-- **Alta cardinalidade** (~3 colunas): nomes/identificadores livres
+| Causa do descarte                       | Qtd | Colunas |
+|-----------------------------------------|-----|---------|
+| Vazamento de alvo                       | 10  | `CAUSABAS`, `CAUSABAS_O`, `CB_PRE`, `causabas_categoria`, `causabas_subcategoria`, `LINHAA`, `LINHAB`, `LINHAC`, `LINHAD`, `LINHAII` |
+| Variância zero                          | 4   | `TIPOBITO`, `SEXO`, `CAUSAMAT`, `NUDIASINF` |
+| Ignorado dominante (9 > 80%)            | 2   | `EXAME`, `CIRURGIA` |
+| Quase-constância (moda > 95%)           | 3   | `ESTABDESCR` (100% NaN), `COMUNSVOIM` (96,5% NaN), `ALTCAUSA` (100% NaN) |
+| Excesso de NaN (> 50%)                  | 2   | `SERIESCFAL` (82%), `NUDIASOBCO` (81%) |
+| Correlação alta (\|r\| > 0,95)           | 2   | `CODMUNOCOR`, `ocor_CODIGO_UF` (perfeitamente correlacionadas com `CODMUNRES`) |
+| Alta cardinalidade categórica           | 1   | `ESTABDESCR`-like / nomes livres |
+| **Total descartado**                    | **24** | de 50 originais (incluindo `label_cid`) |
 
 ### Justificativas das escolhas
 
-- **LabelEncoder em vez de One-Hot**: mantém o cromossomo curto (~28 genes).
+- **LabelEncoder em vez de One-Hot**: mantém o cromossomo curto (~26 genes).
   Se usássemos One-Hot, colunas como `RACACOR` (5 valores) virariam 5 genes
   individuais, explodindo `L` para perto de 100 e mudando a natureza do
   problema (selecionar atributos × selecionar indicadores).
 - **Limiar de 50% de NaN para descarte**: equilibra perda de informação com
   ruído de imputação massiva. Para colunas muito esparsas, a mediana seria
   representativa demais da minoria que respondeu.
+- **Limiar de 95% para quase-constância**: além da variância zero (`nunique==1`),
+  colunas com 95% do mesmo valor têm sinal informacional negligenciável.
+- **Limiar de 0,95 para correlação**: pares com |r| ≥ 0,95 são funcionalmente
+  redundantes. Mantém-se uma coluna por par; o GA fica livre para selecionar
+  a representação geográfica/categórica restante sem disputa entre clones.
+- **Conversão de 9→NaN antes da imputação**: a alternativa (tratar 9 como
+  categoria) misturaria "ignorado" com categorias reais no mesmo eixo
+  numérico, degradando o sinal. A imputação pela mediana faz uma assunção
+  conservadora ("provavelmente é o valor mais comum").
 - **Imputação por mediana** (não média): robusta a outliers em colunas como
   `OCUP` (códigos ocupacionais com escalas estranhas) e `CODMUN*` (códigos
   de município com grandes saltos numéricos).
 - **Min-Max em [0,1]**: exigido pela especificação. Mantém todos os
   atributos na mesma escala para a entrada da MLP.
+- **Outliers numéricos preservados**: a auditoria mostrou que praticamente
+  todos os "outliers" detectados por IQR em colunas como `CODMUNRES`,
+  `CODESTAB`, `OCUP` são **códigos categóricos**, não valores extremos de
+  uma escala contínua. Tratá-los com winsorização destruiria o significado
+  semântico.
 
 ---
 
