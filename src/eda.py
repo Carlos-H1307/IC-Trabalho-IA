@@ -301,7 +301,7 @@ def run_eda(data_path, output_dir="reports"):
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="EDA da base de câncer do colo do útero.")
-    parser.add_argument("--data-path", default="files/raw/cervical-cancer.xlsx")
+    parser.add_argument("--data-path", default="data/dataset-short.xlsx")
     parser.add_argument("--output-dir", default="reports")
     args = parser.parse_args()
     run_eda(args.data_path, args.output_dir)

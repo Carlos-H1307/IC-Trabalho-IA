@@ -24,7 +24,7 @@ TOURNAMENT_SIZE = 3
 N_EXPERIMENTS = 20
 
 # Caminhos
-DATA_PATH = os.path.join("files", "raw", "cervical-cancer.xlsx")
+DATA_PATH = os.path.join("data", "dataset-short.xlsx")
 LOG_DIR = "logs"
 PLOT_DIR = "plots"
 
@@ -77,7 +77,7 @@ def main():
 
     if not os.path.exists(args.data_path):
         print(f"[ERRO] Arquivo não encontrado em: {args.data_path}")
-        print("       Coloque a base em files/raw/ ou use --data-path.")
+        print("       Coloque a base em data/ ou use --data-path.")
         return
 
     # ------------------------------------------------------------------

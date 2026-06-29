@@ -78,8 +78,15 @@ Cria automaticamente o `.venv/` e instala tudo declarado em `pyproject.toml`
 
 ### 4. Adicionar a base de dados
 
-Coloque o arquivo em `files/raw/cervical-cancer.xlsx`. A pasta `files/` está no
-`.gitignore` — a base é distribuída separadamente via Teams.
+Coloque os arquivos da base distribuídos pelo Teams em `data/`:
+
+```
+data/
+├── dataset-short.xlsx     # usado por padrão
+└── dataset-complete.xlsx  # opcional (versão com 167 colunas)
+```
+
+A pasta `data/` está no `.gitignore` — a base não é versionada.
 
 ---
 
@@ -128,7 +135,7 @@ CLI completa:
 
 | Flag                | Padrão                              | Descrição |
 |---------------------|-------------------------------------|-----------|
-| `--data-path`       | `files/raw/cervical-cancer.xlsx`    | Caminho do arquivo de entrada |
+| `--data-path`       | `data/dataset-short.xlsx`           | Caminho do arquivo de entrada |
 | `--population`      | `150`                                | Tamanho da população do AG |
 | `--generations`     | `200`                                | Limite superior de gerações |
 | `--experiments`     | `20`                                 | Quantidade de execuções independentes |
@@ -161,7 +168,7 @@ docs/
 └── mlp-material/        # material de apoio sobre Redes Neurais
 
 reports/                 # saídas da EDA (versionadas no repo)
-files/raw/               # base de dados (gitignored)
+data/                    # base de dados (gitignored)
 logs/                    # CSVs gerados pelo GA (gitignored)
 plots/                   # gráficos do GA (gitignored)
 ```
