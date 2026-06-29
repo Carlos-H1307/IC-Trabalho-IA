@@ -74,5 +74,4 @@ CLAUDE.md
 AGENTS.md
 .cursor/
 
-# Datasets (provided separately via Teams)
-data/
+reports/
