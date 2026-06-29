@@ -239,6 +239,26 @@ Três classes (códigos CID-10):
 uma observação crítica para a escolha da métrica de aptidão (ver
 [Métrica F1](#métrica-f1-por-que-weighted-e-não-macro)).
 
+#### Nota terminológica
+
+"Câncer do colo do útero" (português) e "cervical cancer" (inglês) são
+sinônimos perfeitos e correspondem **estritamente ao código CID-10 C53**.
+"Colo do útero" = "cervix" = parte inferior do útero.
+
+Apesar do título do trabalho ser "Câncer do Colo do Útero", a base
+disponibilizada cobre **câncer uterino em sentido amplo**, incluindo:
+
+- **C53** (colo do útero / cervical) — 62%
+- **C54** (corpo do útero / endometrial) — 18%
+- **C55** (útero, não especificado) — 20%
+
+C54 e C55 **não são** câncer cervical em sentido estrito. Por essa razão,
+quando este relatório discute classes específicas, sempre usa o código
+CID-10 (C53/C54/C55) em vez de termos como "câncer cervical" — esse último
+seria ambíguo num contexto multiclasse. O termo "câncer do colo do útero"
+é mantido apenas como rótulo do trabalho, respeitando o título dado pelo
+professor.
+
 ### Período coberto
 
 Óbitos de **2010 a 2024** (15 anos). Volume crescente ao longo do tempo,
