@@ -1,6 +1,6 @@
 # Seleção de Atributos com Algoritmos Genéticos e Redes Neurais
 
-Trabalho da disciplina de Inteligência Computacional — CEFET-RJ
+Trabalho da disciplina de Inteligência Computacional, CEFET-RJ
 Prof. Laércio Brito
 
 ## Descrição
@@ -31,8 +31,8 @@ total de atributos disponíveis.
 4. [Análise exploratória dos dados (EDA)](#análise-exploratória-dos-dados-eda)
 5. [Inconsistências detectadas](#inconsistências-detectadas)
 6. [Pipeline de limpeza](#pipeline-de-limpeza)
-7. [Algoritmo Genético — escolhas de projeto](#algoritmo-genético--escolhas-de-projeto)
-8. [Rede Neural (MLP) — escolhas de projeto](#rede-neural-mlp--escolhas-de-projeto)
+7. [Algoritmo Genético, escolhas de projeto](#algoritmo-genético--escolhas-de-projeto)
+8. [Rede Neural (MLP), escolhas de projeto](#rede-neural-mlp--escolhas-de-projeto)
 9. [Função de aptidão e escalonamento](#função-de-aptidão-e-escalonamento)
 10. [Métrica F1: por que weighted e não macro](#métrica-f1-por-que-weighted-e-não-macro)
 11. [Procedimento experimental](#procedimento-experimental)
@@ -128,14 +128,14 @@ uv run python src/eda.py
 ```
 
 Saídas em `reports/` (commitado no repo para fins de relatório):
-- `eda_summary.txt` — resumo textual completo
-- `eda_class_distribution.png` — distribuição das 3 classes
-- `eda_missingness.png` — % de NaN por coluna
-- `eda_age_by_class.png` — boxplot de idade por classe
-- `eda_temporal.png` — evolução temporal das classes
-- `eda_correlation.png` — matriz de correlação numérica
-- `eda_numeric_stats.csv` — describe() das numéricas
-- `eda_categorical_stats.csv` — contagem das categóricas
+- `eda_summary.txt`, resumo textual completo
+- `eda_class_distribution.png`, distribuição das 3 classes
+- `eda_missingness.png`, % de NaN por coluna
+- `eda_age_by_class.png`, boxplot de idade por classe
+- `eda_temporal.png`, evolução temporal das classes
+- `eda_correlation.png`, matriz de correlação numérica
+- `eda_numeric_stats.csv`, describe() das numéricas
+- `eda_categorical_stats.csv`, contagem das categóricas
 
 ### Pipeline principal (GA + MLP)
 
@@ -167,7 +167,7 @@ CLI completa:
 | `--generations`     | `200`                                | Limite superior de gerações |
 | `--experiments`     | `20`                                 | Quantidade de execuções independentes |
 | `--sample-size`     | `3000`                               | Amostra estratificada (0 = base completa) |
-| `--quick`           | —                                    | Atalho: 2 experimentos × 20 gerações, pop 30 |
+| `--quick`           |,                                    | Atalho: 2 experimentos × 20 gerações, pop 30 |
 
 ---
 
@@ -248,13 +248,13 @@ sinônimos perfeitos e correspondem **estritamente ao código CID-10 C53**.
 Apesar do título do trabalho ser "Câncer do Colo do Útero", a base
 disponibilizada cobre **câncer uterino em sentido amplo**, incluindo:
 
-- **C53** (colo do útero / cervical) — 62%
-- **C54** (corpo do útero / endometrial) — 18%
-- **C55** (útero, não especificado) — 20%
+- **C53** (colo do útero / cervical), 62%
+- **C54** (corpo do útero / endometrial), 18%
+- **C55** (útero, não especificado), 20%
 
 C54 e C55 **não são** câncer cervical em sentido estrito. Por essa razão,
 quando este relatório discute classes específicas, sempre usa o código
-CID-10 (C53/C54/C55) em vez de termos como "câncer cervical" — esse último
+CID-10 (C53/C54/C55) em vez de termos como "câncer cervical", esse último
 seria ambíguo num contexto multiclasse. O termo "câncer do colo do útero"
 é mantido apenas como rótulo do trabalho, respeitando o título dado pelo
 professor.
@@ -264,7 +264,7 @@ professor.
 Óbitos de **2010 a 2024** (15 anos). Volume crescente ao longo do tempo,
 saindo de ~8.100 registros/ano em 2010 para ~12.000 em 2024. A proporção das
 classes muda discretamente ao longo do tempo (C53 estável em ~62%, C54
-crescendo de 12% para 22%, C55 caindo de 26% para 15%) — sugerindo
+crescendo de 12% para 22%, C55 caindo de 26% para 15%), sugerindo
 melhora na precisão de classificação ao longo dos anos, e não mudança
 epidemiológica real.
 
@@ -306,15 +306,15 @@ diagnóstico da EDA):
 
 | Inconsistência                            | Detectado | Ação no pipeline |
 |-------------------------------------------|----------|------------------|
-| Registros com `label_cid` nulo            | **0**    | Removidos (`dropna(subset)`) — proteção mesmo sem casos |
+| Registros com `label_cid` nulo            | **0**    | Removidos (`dropna(subset)`), proteção mesmo sem casos |
 | Duplicatas exatas                         | **3**    | Removidas (`drop_duplicates`) |
-| Idades fora de [0, 120]                   | **0**    | — |
+| Idades fora de [0, 120]                   | **0**    |, |
 | Idades nulas                              | **11**   | Imputadas pela mediana (56 anos) |
-| Datas inconsistentes (nasc > óbito)       | **0**    | — |
-| Anos fora de [1996, 2025]                 | **0**    | — |
-| `SEXO ≠ 2` (não-feminino)                 | **0**    | — (esperado: câncer de útero) |
-| Coluna `SEXO` constante                   | **Sim**  | **Removida** — variância zero |
-| Coluna `TIPOBITO` constante               | **Sim**  | **Removida** — variância zero (sempre 2 = óbito não-fetal) |
+| Datas inconsistentes (nasc > óbito)       | **0**    |, |
+| Anos fora de [1996, 2025]                 | **0**    |, |
+| `SEXO ≠ 2` (não-feminino)                 | **0**    |, (esperado: câncer de útero) |
+| Coluna `SEXO` constante                   | **Sim**  | **Removida**, variância zero |
+| Coluna `TIPOBITO` constante               | **Sim**  | **Removida**, variância zero (sempre 2 = óbito não-fetal) |
 | Coluna `CAUSAMAT` 100% nula               | **Sim**  | Removida (variância zero) |
 | Coluna `NUDIASINF` 100% nula              | **Sim**  | Removida (variância zero) |
 | Código 9 ("ignorado") dominante em EXAME  | **94%**  | **Coluna removida** |
@@ -329,14 +329,14 @@ diagnóstico da EDA):
 ### Sobre o código 9 ("ignorado") do DATASUS
 
 No padrão SIM/DATASUS, o valor `9` em campos categóricos representa
-*"ignorado"* — informação ausente, não uma categoria real. Tratá-lo como
+*"ignorado"*, informação ausente, não uma categoria real. Tratá-lo como
 categoria normal mistura ausência de informação com categorias válidas e
 introduz ruído. O pipeline aplica duas estratégias:
 
 1. **Descarte por dominância (etapa 7)**: para colunas em
    `IGNORADO_CODE_COLUMNS` (RACACOR, ESTCIV, ESC, ASSISTMED, EXAME, CIRURGIA,
    NECROPSIA, etc.) onde **mais de 80%** dos valores são 9, a coluna é
-   descartada inteira — não há sinal útil. Aplicado a `EXAME` (94%) e
+   descartada inteira, não há sinal útil. Aplicado a `EXAME` (94%) e
    `CIRURGIA` (95%).
 2. **Conversão para NaN (etapa 9)**: para as colunas que sobreviveram à
    etapa anterior, todo valor 9 é substituído por NaN antes da imputação.
@@ -351,7 +351,7 @@ Mesmo quando uma coluna não é tecnicamente "constante" (variância zero),
 se um único valor concentra mais de **95%** dos registros, ela tem variância
 pequena demais para a MLP aprender padrões úteis. O detector
 (`_drop_near_constant_columns`) captura colunas que escapariam dos filtros
-de "variância zero" e "alto NaN" — por exemplo, colunas com mistura de NaN
+de "variância zero" e "alto NaN", por exemplo, colunas com mistura de NaN
 + um único valor real.
 
 ### Correlação alta (|r| > 0,95)
@@ -373,7 +373,7 @@ seria redundância pura.
 ### Por que não tratar outliers nas numéricas
 
 A auditoria detectou apenas **7 outliers** em `idade_obito_anos` (1,5×IQR),
-todos no intervalo [11–13] ou [111–114] — valores plausíveis para casos
+todos no intervalo [11–13] ou [111–114], valores plausíveis para casos
 médicos extremos. Outliers detectados em colunas como `CODMUNRES`,
 `CODESTAB`, `OCUP` não são outliers reais: são **códigos categóricos
 disfarçados de números** (códigos de município, IDs de estabelecimento,
@@ -452,7 +452,7 @@ balanceados estratificadamente (padrão).
 
 ---
 
-## Algoritmo Genético — escolhas de projeto
+## Algoritmo Genético, escolhas de projeto
 
 ### Representação dos cromossomos (`src/ga/chromosome.py`)
 
@@ -468,11 +468,11 @@ desprezível mas possível).
 
 **Atributos armazenados em cada cromossomo:**
 
-- `genes` — lista de 0s e 1s
-- `fitness` — valor final da função de aptidão
-- `f1_score` — F1 weighted bruto (componente principal do fitness)
-- `scaled_fitness` — fitness após normalização linear da população
-- `key()` — tupla imutável, usada como chave do cache
+- `genes`, lista de 0s e 1s
+- `fitness`, valor final da função de aptidão
+- `f1_score`, F1 weighted bruto (componente principal do fitness)
+- `scaled_fitness`, fitness após normalização linear da população
+- `key()`, tupla imutável, usada como chave do cache
 
 ### Operadores genéticos
 
@@ -489,7 +489,7 @@ Implementado em `Chromosome.crossover`:
 #### Mutação bit-flip (Pm = 1/L)
 
 Cada gene é invertido com probabilidade `Pm = 1/L`. Em média, **1 mutação
-por cromossomo** — valor consagrado para AGs binários (Bäck, 1996). Com L≈28,
+por cromossomo**, valor consagrado para AGs binários (Bäck, 1996). Com L≈28,
 `Pm ≈ 0,036`.
 
 ### Seleção: Torneio de tamanho 3
@@ -501,7 +501,7 @@ Optou-se por torneio em vez de roleta porque:
 (a) pressão seletiva controlada independentemente da escala dos fitness, e
 (b) integra naturalmente com a normalização linear exigida.
 
-### Estratégia evolutiva — Steady-State, Gap = 2
+### Estratégia evolutiva, Steady-State, Gap = 2
 
 Cada **geração** do algoritmo:
 
@@ -514,7 +514,7 @@ Cada **geração** do algoritmo:
 
 ### Elitismo (10 indivíduos)
 
-Os 10 melhores por `fitness` são preservados a cada geração — só os indivíduos
+Os 10 melhores por `fitness` são preservados a cada geração, só os indivíduos
 fora desse top 10 podem ser substituídos. Garante monotonicidade do melhor
 fitness ao longo das gerações.
 
@@ -548,13 +548,13 @@ gerações.
 
 ---
 
-## Rede Neural (MLP) — escolhas de projeto
+## Rede Neural (MLP), escolhas de projeto
 
 ### Arquitetura (`src/nn/model.py`)
 
 | Camada    | Neurônios          | Ativação | Observação                                 |
 |-----------|--------------------|----------|--------------------------------------------|
-| Entrada   | `input_dim`        | —        | igual ao nº de genes ativos no cromossomo  |
+| Entrada   | `input_dim`        |,        | igual ao nº de genes ativos no cromossomo  |
 | Oculta 1  | **32**             | ReLU     | conforme especificação                     |
 | Oculta 2  | **16**             | ReLU     | conforme especificação                     |
 | Saída     | `n_classes` (= 3)  | Softmax  | um neurônio por classe                     |
@@ -563,7 +563,7 @@ A entrada **se adapta** ao cromossomo: cada avaliação instancia um modelo
 novo com `input_dim` igual aos atributos selecionados. É isso que permite
 ao GA comparar configurações com tamanhos de entrada diferentes.
 
-Sem `Dropout` ou `BatchNormalization` — não foram pedidos e o early stopping
+Sem `Dropout` ou `BatchNormalization`, não foram pedidos e o early stopping
 já cobre regularização.
 
 ### Treinamento (`src/nn/trainer.py`)
@@ -579,11 +579,11 @@ já cobre regularização.
 | **Métrica de aptidão** | **F1-Score weighted** no teste                              | reflete desbalanceamento real (ver seção dedicada) |
 | Métrica auxiliar    | F1-Score macro                                                 | logado para diagnóstico de viés por classe |
 
-### Divisão dos dados — 70/15/15 estratificada
+### Divisão dos dados, 70/15/15 estratificada
 
 A divisão acontece **dentro da função de fitness** (`trainer._split_70_15_15`),
 ou seja, **a cada avaliação de cromossomo**. Não é um split único feito no
-início — é refeito a cada chamada de `train_and_evaluate_nn`.
+início, é refeito a cada chamada de `train_and_evaluate_nn`.
 
 #### Mecânica: dois `train_test_split` em cascata
 
@@ -602,7 +602,7 @@ X_val, X_test, y_val, y_test = train_test_split(
 |-------------|------|-----|
 | Treino      | 70%  | Ajusta pesos via Backpropagation |
 | Validação   | 15%  | Monitorado pelo `EarlyStopping(monitor="val_loss")` para escolher a melhor versão dos pesos (`restore_best_weights=True`) |
-| Teste       | 15%  | Mede F1-Score reportado como fitness — **uma única vez por cromossomo** |
+| Teste       | 15%  | Mede F1-Score reportado como fitness, **uma única vez por cromossomo** |
 
 #### Estratificação
 
@@ -643,7 +643,7 @@ Consequência prática:
   fica inviável. A spec não pediu.
 - **Split único globalmente fixo (mesma semente em todos os 20 experimentos)**:
   mais simples, mas a "curva média de convergência" perderia o sinal de
-  variabilidade do split — só capturaria ruído da inicialização aleatória
+  variabilidade do split, só capturaria ruído da inicialização aleatória
   da população do GA.
 - **Split antes do GA, fora do loop**: mais eficiente (split não é refeito
   a cada cromossomo), mas as duas abordagens são funcionalmente
@@ -698,7 +698,7 @@ A escolha **importa muito** porque a base é fortemente desbalanceada:
 **Comportamento de cada esquema:**
 
 - **F1 macro** trata as 3 classes igualmente. Um modelo que acerta 95% em C53
-  mas só 30% em C54 e C55 fica com macro F1 ≈ 0,52 — fortemente penalizado.
+  mas só 30% em C54 e C55 fica com macro F1 ≈ 0,52, fortemente penalizado.
 - **F1 weighted** pondera pelo suporte real. O mesmo modelo fica com weighted F1
   ≈ 0,76, refletindo o desempenho esperado em produção (onde 62% dos casos
   reais são C53).
@@ -710,7 +710,7 @@ A escolha **importa muito** porque a base é fortemente desbalanceada:
    óbitos, a distribuição esperada é ~62/20/18, não 33/33/33. O weighted
    reflete a métrica relevante.
 2. **Decisão consciente do trade-off.** Não estamos cegos ao desbalanceamento
-   — estamos **ponderando deliberadamente** pelo suporte real, em vez de
+  , estamos **ponderando deliberadamente** pelo suporte real, em vez de
    fingir que as classes são igualmente prevalentes.
 3. **Métrica macro ainda é logada** para diagnóstico. Em `nn_metrics.csv`,
    a coluna `f1_macro` permite verificar se o modelo está ignorando
@@ -718,7 +718,7 @@ A escolha **importa muito** porque a base é fortemente desbalanceada:
    indica viés para C53.
 
 **Alternativa considerada e descartada:** transformar o problema em binário
-(C53 vs. não-C53) — alinharia com o título do trabalho ("câncer **do colo**
+(C53 vs. não-C53), alinharia com o título do trabalho ("câncer **do colo**
 do útero"), mas a especificação pede "número de neurônios igual ao número
 de classes da base", que são 3. Manter as 3 classes está correto.
 
@@ -730,7 +730,7 @@ de classes da base", que são 3. Manter as 3 classes está correto.
 
 Loop em `src/main.py`:
 
-1. **Seed reset** — semente fixada para `numpy`, `random`, `tensorflow` em
+1. **Seed reset**, semente fixada para `numpy`, `random`, `tensorflow` em
    `42 + exp_id`, garantindo reprodutibilidade.
 2. População inicial gerada aleatoriamente.
 3. Avaliação completa da população inicial (geração 0).
@@ -745,7 +745,7 @@ Ao final dos 20 experimentos:
   fitness daquela geração entre os 20 experimentos.
 - Experimentos parados antes da geração g têm seu último valor propagado
   (`ffill`) para evitar buracos na média.
-- A curva final é a **média dos melhores em 20 experimentos** — exatamente
+- A curva final é a **média dos melhores em 20 experimentos**, exatamente
   o gráfico exigido no item 8 da especificação.
 
 ### Métricas finais reportadas
@@ -764,19 +764,19 @@ Ao final dos 20 experimentos:
 
 Geradas por `src/eda.py`. Versionadas no repo para o relatório.
 
-- `eda_summary.txt` — resumo textual com classes, inconsistências,
+- `eda_summary.txt`, resumo textual com classes, inconsistências,
   estatísticas, colunas a remover
-- `eda_class_distribution.png` — barras das 3 classes
-- `eda_missingness.png` — top colunas com NaN
-- `eda_age_by_class.png` — boxplot idade × classe
-- `eda_temporal.png` — proporção de classes por ano
-- `eda_correlation.png` — matriz de correlação numérica
-- `eda_numeric_stats.csv` — `describe()` das numéricas
-- `eda_categorical_stats.csv` — contagem de baixa cardinalidade
+- `eda_class_distribution.png`, barras das 3 classes
+- `eda_missingness.png`, top colunas com NaN
+- `eda_age_by_class.png`, boxplot idade × classe
+- `eda_temporal.png`, proporção de classes por ano
+- `eda_correlation.png`, matriz de correlação numérica
+- `eda_numeric_stats.csv`, `describe()` das numéricas
+- `eda_categorical_stats.csv`, contagem de baixa cardinalidade
 
 ### Logs do GA (`logs/`, gitignored)
 
-`ga_metrics.csv` — uma linha por (experimento, geração):
+`ga_metrics.csv`, uma linha por (experimento, geração):
 
 | Coluna                  | Conteúdo                                                       |
 |-------------------------|----------------------------------------------------------------|
@@ -789,7 +789,7 @@ Geradas por `src/eda.py`. Versionadas no repo para o relatório.
 | `num_atributos_ativos`  | Nº de genes = 1 no melhor cromossomo                           |
 | `melhor_cromossomo`     | Máscara binária (string concatenada)                           |
 
-`nn_metrics.csv` — uma linha por avaliação de cromossomo:
+`nn_metrics.csv`, uma linha por avaliação de cromossomo:
 
 | Coluna                | Conteúdo                                                |
 |-----------------------|---------------------------------------------------------|
@@ -805,12 +805,12 @@ Geradas por `src/eda.py`. Versionadas no repo para o relatório.
 
 ### Gráficos do GA (`plots/`, gitignored)
 
-- **`ga_convergencia_media.png`** — média do melhor fitness por geração
+- **`ga_convergencia_media.png`**, média do melhor fitness por geração
   (entre N experimentos), banda de ± 1 σ. **Gráfico principal exigido pelo
   trabalho.**
-- **`ga_convergencia_por_experimento.png`** — uma curva por experimento.
-- **`ga_fitness_componentes.png`** — melhor/médio/pior do primeiro experimento.
-- **`nn_atributos_vs_f1.png`** — dispersão F1 × atributos ativos.
+- **`ga_convergencia_por_experimento.png`**, uma curva por experimento.
+- **`ga_fitness_componentes.png`**, melhor/médio/pior do primeiro experimento.
+- **`nn_atributos_vs_f1.png`**, dispersão F1 × atributos ativos.
 
 ---
 
@@ -824,7 +824,7 @@ Escolhas técnicas feitas além do que a especificação prescreve:
 | **F1 weighted como fitness primário** (e não macro) | Desbalanceamento real é 62/20/18. Macro penaliza excessivamente erros nas minoritárias; weighted reflete o desempenho esperado em produção. F1 macro é logado em paralelo para diagnóstico. |
 | Remoção de 14 colunas de vazamento de alvo | Sem isso, F1 = 1,0 trivialmente e o GA não tem espaço de busca. |
 | Remoção de colunas constantes (SEXO, TIPOBITO) | Variância zero → zero poder discriminativo. |
-| Remoção de colunas dominadas por "ignorado" (9 > 80%) | EXAME e CIRURGIA têm 94–95% de "ignorado" — sem sinal. |
+| Remoção de colunas dominadas por "ignorado" (9 > 80%) | EXAME e CIRURGIA têm 94–95% de "ignorado", sem sinal. |
 | LabelEncoder para categóricas em vez de One-Hot | Mantém o cromossomo curto (~28 genes) e fiel à ideia de "selecionar atributos". |
 | Limite de 50% de NaN para descartar coluna | Compromisso entre perda de informação e imputação massiva. |
 | Limite de 50 valores únicos para descartar categóricas | Acima disso, IDs ou nomes livres sem informação discriminativa. |
@@ -839,7 +839,7 @@ Escolhas técnicas feitas além do que a especificação prescreve:
 
 ## Referências de material
 
-- `docs/ga-mlp-task.pdf` — enunciado oficial do trabalho.
-- `docs/ga-material/` — material de apoio sobre Algoritmos Genéticos.
-- `docs/mlp-material/` — material de apoio sobre Redes Neurais.
-- `reports/eda_summary.txt` — resumo completo da análise exploratória.
+- `docs/ga-mlp-task.pdf`, enunciado oficial do trabalho.
+- `docs/ga-material/`, material de apoio sobre Algoritmos Genéticos.
+- `docs/mlp-material/`, material de apoio sobre Redes Neurais.
+- `reports/eda_summary.txt`, resumo completo da análise exploratória.
