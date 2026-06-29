@@ -533,18 +533,74 @@ já cobre regularização.
 
 ### Divisão dos dados — 70/15/15 estratificada
 
-- 70% treino: ajusta pesos via Backpropagation
-- 15% validação: usada pelo `EarlyStopping` para escolher a melhor versão
-- 15% teste: medição final do F1, **uma única vez por cromossomo**
+A divisão acontece **dentro da função de fitness** (`trainer._split_70_15_15`),
+ou seja, **a cada avaliação de cromossomo**. Não é um split único feito no
+início — é refeito a cada chamada de `train_and_evaluate_nn`.
 
-Implementada em dois `train_test_split` em cascata, ambos com `stratify=y`
-(preserva proporção das três classes).
+#### Mecânica: dois `train_test_split` em cascata
 
-**Random state controlado por experimento:** semente da divisão depende do
-ID do experimento (`42 + exp_id`). Dentro de um experimento, todos os
-cromossomos são avaliados na **mesma partição** (comparação justa). Entre
-experimentos diferentes, as partições variam, gerando a variabilidade
-capturada pela curva de convergência média.
+```python
+# 1º split: 70% treino, 30% temp
+X_train, X_temp, y_train, y_temp = train_test_split(
+    X, y, test_size=0.30, random_state=random_state, stratify=y
+)
+# 2º split: temp dividido 50/50 → 15% val, 15% teste
+X_val, X_test, y_val, y_test = train_test_split(
+    X_temp, y_temp, test_size=0.50, random_state=random_state, stratify=y_temp
+)
+```
+
+| Conjunto    | %    | Uso |
+|-------------|------|-----|
+| Treino      | 70%  | Ajusta pesos via Backpropagation |
+| Validação   | 15%  | Monitorado pelo `EarlyStopping(monitor="val_loss")` para escolher a melhor versão dos pesos (`restore_best_weights=True`) |
+| Teste       | 15%  | Mede F1-Score reportado como fitness — **uma única vez por cromossomo** |
+
+#### Estratificação
+
+Os dois splits recebem `stratify=y` (no primeiro) e `stratify=y_temp` (no
+segundo). Isso garante que **cada conjunto preserva a proporção original das
+3 classes** (~62% C53 / 20% C55 / 18% C54). Crítico para uma base
+desbalanceada: sem estratificação, era possível um split degenerado com
+poucos exemplos de C54 no teste, inflando ou deflando o F1 por sorte do
+sorteio.
+
+#### Propagação do `random_state`
+
+A semente flui do `main.py` até o trainer:
+
+```
+main.py: random_state = 42 + exp_id
+   ↓
+GeneticAlgorithm.__init__(random_state=...)
+   ↓
+evaluate_chromosome(random_state=...)        em fitness.py
+   ↓
+train_and_evaluate_nn(random_state=...)      em trainer.py
+   ↓
+_split_70_15_15(random_state=...)            mesma semente para os 2 splits
+```
+
+Consequência prática:
+
+| Cenário | Comportamento |
+|---|---|
+| Dois cromossomos no **mesmo experimento** | Recebem **a mesma semente** → mesma partição treino/val/teste → comparação **justa** de fitness |
+| Mesmo cromossomo em **experimentos diferentes** | Recebe `42 + exp_id` diferente → partição diferente → fitness varia. Essa variância alimenta a banda de desvio na curva média de convergência |
+
+#### Alternativas consideradas
+
+- **K-fold cross-validation**: estatisticamente mais robusto, mas multiplica
+  o custo por `k`. Para 20 experimentos × ~400 avaliações × k folds, o tempo
+  fica inviável. A spec não pediu.
+- **Split único globalmente fixo (mesma semente em todos os 20 experimentos)**:
+  mais simples, mas a "curva média de convergência" perderia o sinal de
+  variabilidade do split — só capturaria ruído da inicialização aleatória
+  da população do GA.
+- **Split antes do GA, fora do loop**: mais eficiente (split não é refeito
+  a cada cromossomo), mas as duas abordagens são funcionalmente
+  equivalentes porque dentro de um experimento o `random_state` é
+  constante. Ganho marginal não justifica a refatoração.
 
 ---
 
@@ -559,8 +615,8 @@ Fitness = 0,9 × F1-Score + 0,1 × (1 − Ns/Nt)
 - **F1-Score (peso 0,9)**: F1 *weighted* no conjunto de teste. Maximiza a
   qualidade preditiva ponderada pelo desbalanceamento real.
 - **Parcimônia (peso 0,1)**: `1 − Ns/Nt` recompensa cromossomos com poucos
-  atributos. Para Nt=28, um cromossomo com 8 atributos ganha bônus
-  `0,1 × (1 − 8/28) = 0,071`.
+  atributos. Para Nt=26, um cromossomo com 8 atributos ganha bônus
+  `0,1 × (1 − 8/26) = 0,069`.
 
 Cromossomos com **zero atributos ativos** recebem fitness = 0 (caso de borda).
 
