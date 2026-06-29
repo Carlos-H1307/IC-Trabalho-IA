@@ -43,8 +43,9 @@ total de atributos disponíveis.
 
 ## Setup
 
-O projeto usa [uv](https://docs.astral.sh/uv/) para gerenciar dependências e
-o ambiente virtual.
+O projeto usa [uv](https://docs.astral.sh/uv/) para dependências e
+[git-lfs](https://git-lfs.com) para versionar os arquivos pesados da base de
+dados (≈ 150 MB).
 
 ### 1. Instalar o uv
 
@@ -60,14 +61,52 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 Após instalar, reinicie o terminal.
 
-### 2. Clonar o repositório
+### 2. Instalar o git-lfs
+
+**macOS**
+```bash
+brew install git-lfs
+```
+
+**Ubuntu/Debian**
+```bash
+sudo apt install git-lfs
+```
+
+**Windows**
+```powershell
+choco install git-lfs
+```
+
+Após instalar, inicialize uma vez por usuário:
+
+```bash
+git lfs install
+```
+
+### 3. Clonar o repositório
 
 ```bash
 git clone https://github.com/Carlos-H1307/IC-Trabalho-IA.git
 cd IC-Trabalho-IA
 ```
 
-### 3. Instalar as dependências
+O `git clone` já baixa os arquivos `.xlsx` da base via LFS automaticamente.
+Verifique:
+
+```bash
+ls -lh data/
+# dataset-short.xlsx     ~33M
+# dataset-complete.xlsx  ~115M
+```
+
+Se os arquivos vierem com poucos KB (são ponteiros LFS), rode:
+
+```bash
+git lfs pull
+```
+
+### 4. Instalar as dependências
 
 ```bash
 uv sync
@@ -75,18 +114,6 @@ uv sync
 
 Cria automaticamente o `.venv/` e instala tudo declarado em `pyproject.toml`
 (TensorFlow/Keras, scikit-learn, pandas, openpyxl, matplotlib).
-
-### 4. Adicionar a base de dados
-
-Coloque os arquivos da base distribuídos pelo Teams em `data/`:
-
-```
-data/
-├── dataset-short.xlsx     # usado por padrão
-└── dataset-complete.xlsx  # opcional (versão com 167 colunas)
-```
-
-A pasta `data/` está no `.gitignore` — a base não é versionada.
 
 ---
 
@@ -168,7 +195,7 @@ docs/
 └── mlp-material/        # material de apoio sobre Redes Neurais
 
 reports/                 # saídas da EDA (versionadas no repo)
-data/                    # base de dados (gitignored)
+data/                    # base de dados (versionada via git-lfs)
 logs/                    # CSVs gerados pelo GA (gitignored)
 plots/                   # gráficos do GA (gitignored)
 ```
@@ -182,9 +209,10 @@ Resultados produzidos por `src/eda.py` sobre a base
 
 ### Origem
 
-Base distribuída pelo professor via Teams, com registros do Sistema de
-Informações sobre Mortalidade (SIM/DATASUS) referentes a óbitos por câncer do
-colo do útero (códigos CID-10 C53, C54, C55). Dois arquivos foram
+Base disponibilizada pelo professor (via Teams) e versionada no repositório
+através de git-lfs. Contém registros do Sistema de Informações sobre
+Mortalidade (SIM/DATASUS) referentes a óbitos por câncer do colo do útero
+(códigos CID-10 C53, C54, C55). Dois arquivos foram
 disponibilizados:
 
 | Arquivo                    | Registros | Colunas |
