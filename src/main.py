@@ -50,9 +50,6 @@ def parse_args():
     parser.add_argument("--experiments", type=int, default=N_EXPERIMENTS)
     parser.add_argument("--sample-size", type=int, default=DEFAULT_SAMPLE_SIZE,
                         help="Amostra estratificada dos registros. Use 0 para usar a base inteira.")
-    parser.add_argument("--workers", type=int, default=1,
-                        help="Nº de processos paralelos para mini-ciclos dentro de cada geração. "
-                             "1 = serial. Recomendado: M3 Pro Max 36GB → 8; Ryzen 3600 16GB → 4-6.")
     parser.add_argument("--quick", action="store_true",
                         help="Modo rápido para teste: poucos experimentos e gerações.")
     return parser.parse_args()
@@ -63,11 +60,10 @@ def main():
 
     if args.quick:
         # Modo smoke-test: valida o pipeline end-to-end rapidamente.
-        # Com pop=20, elite=10, gap=2 → 5 mini-ciclos × 2 = 10 evals/gen
-        # 2 exps × 5 gens × 10 = 100 avaliações totais → ~3 min serial
+        # 2 exps × 20 gens × 2 = 80 avaliações novas + 2 × 30 pop_size iniciais
         args.experiments = 2
-        args.generations = 5
-        args.population = 20
+        args.generations = 20
+        args.population = 30
 
     sample_size = args.sample_size if args.sample_size > 0 else None
 
@@ -99,22 +95,16 @@ def main():
     # ------------------------------------------------------------------
     # 3) Resumo dos hiperparâmetros
     # ------------------------------------------------------------------
-    n_non_elite = args.population - ELITE_SIZE
-    mini_cycles = n_non_elite // GAP
     print("\n[INFO] Hiperparâmetros:")
     print(f"  População: {args.population}")
-    print(f"  Crossover Uniforme, Pc = {CROSSOVER_RATE}")
-    print(f"  Mutação: Pm = 1/L = {mutation_rate:.5f} (L = {L})")
     print(f"  Elitismo: {ELITE_SIZE}, Gap (steady-state): {GAP}")
-    print(f"  Mini-ciclos por geração: {mini_cycles} → "
-          f"{mini_cycles * GAP} avaliações novas por geração")
+    print(f"  Substituição: {GAP} piores → {GAP} cromossomos aleatórios novos por geração")
     print(f"  Gerações máx.: {args.generations} | Estagnação: {STAGNATION_LIMIT}")
     print(f"  Experimentos: {args.experiments}")
-    print(f"  Workers (mini-ciclos paralelos): {args.workers}")
     print()
 
     # ------------------------------------------------------------------
-    # 4) Loop de N experimentos (sempre serial, paralelismo é intra-geração)
+    # 4) Loop de N experimentos
     # ------------------------------------------------------------------
     results = []
     overall_start = time.time()
@@ -140,7 +130,6 @@ def main():
             logger=logger,
             experiment_id=exp_id,
             random_state=42 + exp_id,
-            workers=args.workers,
         )
 
         best_genes, best_fitness, best_f1 = ga.evolve()
@@ -176,7 +165,7 @@ def main():
     print(f"Fitness médio:  {fitnesses.mean():.4f} ± {fitnesses.std():.4f}")
     print(f"F1-Score médio: {f1s.mean():.4f} ± {f1s.std():.4f}")
     print(f"Atributos selecionados (média): {nfeats.mean():.1f} de {L}")
-    print(f"Tempo total: {total_elapsed/60:.1f} min ({args.workers} workers)")
+    print(f"Tempo total: {total_elapsed/60:.1f} min")
 
     best_idx = int(np.argmax(fitnesses))
     best = results[best_idx]

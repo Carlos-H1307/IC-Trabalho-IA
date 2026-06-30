@@ -505,16 +505,26 @@ Optou-se por torneio em vez de roleta porque:
 
 Cada **geração** do algoritmo:
 
-1. Seleciona 2 pais via torneio.
-2. Aplica crossover uniforme → 2 filhos.
-3. Aplica mutação bit-flip aos 2 filhos.
-4. Avalia a aptidão dos 2 filhos (treinar MLP em cada).
-5. Substitui os 2 piores indivíduos **fora da elite**.
-6. Recomputa `scaled_fitness` para a nova população.
+1. Preserva os **10 melhores** indivíduos (elitismo).
+2. Gera `gap = 2` cromossomos **novos aleatórios do zero** (mesma distribuição
+   da população inicial: cada gene sorteado independentemente com p=0,5).
+3. Avalia os 2 novos cromossomos (treina MLP em cada).
+4. Substitui os 2 piores indivíduos da população pelos 2 novos.
+5. Recomputa `scaled_fitness` para a nova população.
+
+Os 138 indivíduos intermediários permanecem inalterados de uma geração
+para a próxima — apenas o "fundo" da população é renovado.
+
+> **Nota sobre crossover e mutação**: o spec define `Pc = 0,85` e `Pm = 1/L`,
+> mas neste algoritmo eles não são aplicados no loop evolutivo. Crossover e
+> mutação ficam disponíveis como operadores em `Chromosome.crossover` e
+> `Chromosome.mutate` (úteis para variações do algoritmo), mas o `evolve()`
+> usa apenas substituição aleatória + elitismo. Os parâmetros são mantidos
+> nos hiperparâmetros para documentação fiel à spec.
 
 ### Elitismo (10 indivíduos)
 
-Os 10 melhores por `fitness` são preservados a cada geração, só os indivíduos
+Os 10 melhores por `fitness` são preservados a cada geração — só os indivíduos
 fora desse top 10 podem ser substituídos. Garante monotonicidade do melhor
 fitness ao longo das gerações.
 
