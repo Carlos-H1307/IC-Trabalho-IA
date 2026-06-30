@@ -1,22 +1,26 @@
+import random
+
 from ga.chromosome import Chromosome
 from ga.fitness import evaluate_chromosome, linear_scale_population
 
 
 class GeneticAlgorithm:
     """
-    Algoritmo Genético com substituição aleatória dos 2 piores + Elitismo de 10.
+    Algoritmo Genético Steady-State com Gap=2 e Elitismo de 10.
 
     A cada geração:
       1. Os 10 melhores indivíduos são preservados intactos (elitismo).
-      2. Os 2 piores indivíduos são substituídos por 2 cromossomos
-         gerados aleatoriamente do zero (mesma distribuição da geração 0:
-         cada gene sorteado independentemente com p=0.5).
-      3. Os 138 indivíduos intermediários permanecem inalterados.
+      2. Seleciona 2 pais via torneio (usando fitness escalado).
+      3. Aplica Crossover Uniforme com probabilidade Pc → 2 filhos.
+      4. Aplica mutação bit-flip nos filhos com probabilidade Pm = 1/L.
+      5. Avalia os 2 filhos via MLP + função de aptidão.
+      6. Substitui os 2 piores indivíduos da população pelos 2 filhos.
 
-    Crossover e mutação NÃO são aplicados no loop evolutivo — só durante a
-    inicialização (que sorteia genes 0/1 com p=0.5). Os parâmetros Pc e Pm
-    da especificação permanecem disponíveis em `Chromosome.crossover` e
-    `Chromosome.mutate` para uso opcional, mas não são chamados aqui.
+    Os 138 indivíduos intermediários (entre top 10 e os 2 piores) permanecem
+    inalterados entre gerações — apenas o "fundo" da população é renovado.
+
+    Spec compliance: Pc = 0,85 e Pm = 1/L são ambos aplicados conforme exigido
+    pelo enunciado. Crossover é uniforme conforme spec.
 
     Por experimento (com pop=150, max_gen=200):
       - 150 avaliações iniciais (geração 0)
@@ -31,14 +35,14 @@ class GeneticAlgorithm:
         self,
         population_size,
         chromosome_length,
-        crossover_rate,         # mantido na assinatura por compatibilidade; não usado
-        mutation_rate,          # idem
+        crossover_rate,
+        mutation_rate,
         X,
         y,
         n_classes,
         elite_size=10,
         gap=2,
-        tournament_size=3,      # idem (sem torneio neste algoritmo)
+        tournament_size=3,
         max_generations=200,
         stagnation_limit=20,
         logger=None,
@@ -48,11 +52,14 @@ class GeneticAlgorithm:
     ):
         self.population_size = population_size
         self.chromosome_length = chromosome_length
+        self.crossover_rate = crossover_rate
+        self.mutation_rate = mutation_rate
         self.X = X
         self.y = y
         self.n_classes = n_classes
         self.elite_size = elite_size
         self.gap = gap
+        self.tournament_size = tournament_size
         self.max_generations = max_generations
         self.stagnation_limit = stagnation_limit
         self.logger = logger
@@ -86,6 +93,11 @@ class GeneticAlgorithm:
                     fitness_cache=self.fitness_cache,
                     random_state=self.random_state,
                 )
+
+    def _select_parent(self):
+        """Seleção por torneio usando fitness escalado (normalização linear)."""
+        tournament = random.sample(self.population, self.tournament_size)
+        return max(tournament, key=lambda c: c.scaled_fitness)
 
     def _log_generation(self, generation):
         fitnesses = [c.fitness for c in self.population]
@@ -126,18 +138,26 @@ class GeneticAlgorithm:
 
         stagnation = 0
 
-        # 2) Evolução: a cada geração, 2 piores → 2 novos aleatórios
+        # 2) Evolução steady-state com crossover + mutação
         for generation in range(1, self.max_generations + 1):
-            # Gera `gap` cromossomos novos aleatórios (mesma distribuição da pop inicial)
-            new_chromosomes = [
-                Chromosome(self.chromosome_length) for _ in range(self.gap)
-            ]
+            # Seleciona 2 pais via torneio sobre o pool atual
+            parent1 = self._select_parent()
+            parent2 = self._select_parent()
 
-            # Avalia os novos
-            for j, chromo in enumerate(new_chromosomes):
-                cid = f"exp{self.experiment_id}_gen{generation}_new{j}"
+            # Crossover uniforme (Pc = 0,85)
+            child1, child2 = parent1.crossover(parent2, self.crossover_rate)
+
+            # Mutação bit-flip (Pm = 1/L)
+            child1.mutate(self.mutation_rate)
+            child2.mutate(self.mutation_rate)
+
+            children = [child1, child2][: self.gap]
+
+            # Avalia os filhos
+            for j, child in enumerate(children):
+                cid = f"exp{self.experiment_id}_gen{generation}_child{j}"
                 evaluate_chromosome(
-                    chromo,
+                    child,
                     self.X,
                     self.y,
                     n_classes=self.n_classes,
@@ -148,12 +168,12 @@ class GeneticAlgorithm:
                     random_state=self.random_state,
                 )
 
-            # Substitui os `gap` piores (que estão fora do top-10 elite por construção:
-            # ordenamos por fitness ascendente, então os `gap` primeiros são os piores)
+            # Substitui os 2 piores indivíduos (que estão fora do top-10 elite
+            # por construção: ordenando ascendente, os `gap` primeiros são os piores)
             self.population.sort(key=lambda c: c.fitness)
-            for j, chromo in enumerate(new_chromosomes):
+            for j, child in enumerate(children):
                 if j < self.population_size - self.elite_size:
-                    self.population[j] = chromo
+                    self.population[j] = child
 
             linear_scale_population(self.population)
 

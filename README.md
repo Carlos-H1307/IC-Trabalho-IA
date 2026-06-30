@@ -506,21 +506,17 @@ Optou-se por torneio em vez de roleta porque:
 Cada **geração** do algoritmo:
 
 1. Preserva os **10 melhores** indivíduos (elitismo).
-2. Gera `gap = 2` cromossomos **novos aleatórios do zero** (mesma distribuição
-   da população inicial: cada gene sorteado independentemente com p=0,5).
-3. Avalia os 2 novos cromossomos (treina MLP em cada).
-4. Substitui os 2 piores indivíduos da população pelos 2 novos.
-5. Recomputa `scaled_fitness` para a nova população.
+2. Seleciona **2 pais** via torneio de 3 (usando `scaled_fitness`).
+3. Aplica **Crossover Uniforme** com `Pc = 0,85` → 2 filhos.
+4. Aplica **mutação bit-flip** nos filhos com `Pm = 1/L`.
+5. Avalia os 2 filhos (treina MLP em cada).
+6. Substitui os 2 piores indivíduos da população pelos 2 filhos.
+7. Recomputa `scaled_fitness` para a nova população.
 
 Os 138 indivíduos intermediários permanecem inalterados de uma geração
 para a próxima — apenas o "fundo" da população é renovado.
 
-> **Nota sobre crossover e mutação**: o spec define `Pc = 0,85` e `Pm = 1/L`,
-> mas neste algoritmo eles não são aplicados no loop evolutivo. Crossover e
-> mutação ficam disponíveis como operadores em `Chromosome.crossover` e
-> `Chromosome.mutate` (úteis para variações do algoritmo), mas o `evolve()`
-> usa apenas substituição aleatória + elitismo. Os parâmetros são mantidos
-> nos hiperparâmetros para documentação fiel à spec.
+Ambos `Pc = 0,85` e `Pm = 1/L` são aplicados no loop conforme a especificação.
 
 ### Elitismo (10 indivíduos)
 
@@ -587,8 +583,40 @@ já cobre regularização.
 | Épocas (máx.)       | 30                                                                                          | `max_iter=30` (early stopping geralmente para antes) |
 | Early stopping      | `early_stopping=True`, `n_iter_no_change=5`, fração de validação interna ≈ 15/85            | "melhor configuração = menor erro de validação" (spec) |
 | L2 regularization   | `alpha=0.0` (desabilitado)                                                                  | spec não exige; mantém comportamento equivalente ao Keras (Keras tampouco regulariza por default) |
+| **Desbalanceamento (treino)** | **Oversampling das minorias** para igualar a majoritária         | spec não exige, mas necessário porque `MLPClassifier` não aceita `class_weight` (ver subseção) |
 | **Métrica de aptidão** | **F1-Score weighted** no teste                                                           | reflete desbalanceamento real (ver seção dedicada) |
 | Métrica auxiliar    | F1-Score macro                                                                              | logado para diagnóstico de viés por classe |
+
+#### Tratamento do desbalanceamento de classes
+
+A base tem distribuição **62% C53 / 20% C55 / 18% C54** (razão maior/menor = 3,53×).
+Sem tratamento, a MLP aprende a "chutar C53" para qualquer entrada — F1 macro
+cai drasticamente porque as minorias C54 e C55 nunca são preditas.
+
+**Limitação técnica do sklearn**: o `MLPClassifier` **não aceita** `class_weight`
+nem `sample_weight` (limitação conhecida da API). Para compensar, aplicamos
+**oversampling com reposição** nas classes minoritárias do conjunto de treino:
+
+```python
+# Antes do treino:
+# C53: 730 amostras (majoritária)
+# C54: 207 amostras → reamostradas para 730 (replicação aleatória)
+# C55: 240 amostras → reamostradas para 730
+# Total de treino: 730 × 3 = 2.190 amostras balanceadas
+```
+
+Implementado via `sklearn.utils.resample` em `trainer._oversample_minority_classes`.
+Aplicado **apenas ao conjunto de treino** — validação e teste preservam a
+distribuição original 62/20/18 para que as métricas reflitam o cenário real
+de produção. Efeito empírico (--quick): F1 weighted subiu de ~0,48 (sem
+oversampling) para ~0,60 (com).
+
+**Alternativas consideradas e descartadas:**
+- `class_weight` no sklearn MLP: não suportado.
+- SMOTE (sintético): adiciona dependência (`imbalanced-learn`) e a vantagem
+  vs. oversampling simples é marginal para nossa cardinalidade baixa de features.
+- Undersampling da majoritária: descartaria ~70% dos dados de C53 (perde sinal).
+- Trocar de framework (PyTorch): regrediria o speedup de 78× do sklearn.
 
 #### Por que sklearn em vez de Keras
 

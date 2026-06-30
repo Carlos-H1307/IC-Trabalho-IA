@@ -1,6 +1,7 @@
 import numpy as np
 from sklearn.metrics import f1_score
 from sklearn.model_selection import train_test_split
+from sklearn.utils import resample
 
 from nn.model import create_mlp_model
 
@@ -19,6 +20,42 @@ def _split_70_15_15(X, y, random_state):
         X_temp, y_temp, test_size=0.50, random_state=random_state, stratify=y_temp
     )
     return X_train, X_val, X_test, y_train, y_val, y_test
+
+
+def _oversample_minority_classes(X, y, random_state):
+    """
+    Reamostra com reposição as classes minoritárias para igualar o tamanho da
+    classe majoritária. Tratamento do desbalanceamento (62/20/18) no nível do
+    treinamento, já que `MLPClassifier` do sklearn não aceita `class_weight`
+    nem `sample_weight`.
+
+    Aplicado apenas ao conjunto de treino — validação e teste preservam a
+    distribuição original para que as métricas reflitam o cenário real.
+    """
+    classes, counts = np.unique(y, return_counts=True)
+    max_count = int(counts.max())
+
+    X_parts, y_parts = [], []
+    for c in classes:
+        mask = y == c
+        X_c, y_c = X[mask], y[mask]
+        if len(X_c) < max_count:
+            X_c, y_c = resample(
+                X_c, y_c,
+                n_samples=max_count,
+                replace=True,
+                random_state=random_state,
+            )
+        X_parts.append(X_c)
+        y_parts.append(y_c)
+
+    X_resampled = np.vstack(X_parts)
+    y_resampled = np.concatenate(y_parts)
+
+    # Embaralha (evita batches consecutivos da mesma classe)
+    rng = np.random.default_rng(random_state)
+    perm = rng.permutation(len(y_resampled))
+    return X_resampled[perm], y_resampled[perm]
 
 
 def train_and_evaluate_nn(
@@ -59,6 +96,10 @@ def train_and_evaluate_nn(
     )
 
     input_dim = X_train.shape[1]
+
+    # Oversampling das classes minoritárias APENAS no conjunto de treino
+    # (validação e teste preservam a distribuição original 62/20/18)
+    X_train, y_train = _oversample_minority_classes(X_train, y_train, random_state)
 
     # Concatena treino + validação para que o sklearn faça o split interno
     # que reproduz nosso 70/15/15
