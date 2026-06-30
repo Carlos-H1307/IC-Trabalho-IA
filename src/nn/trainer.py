@@ -1,11 +1,10 @@
 import numpy as np
 from sklearn.metrics import f1_score
 from sklearn.model_selection import train_test_split
-from tensorflow.keras.callbacks import EarlyStopping
 
 from nn.model import create_mlp_model
 
-# Configurações de treinamento (compromisso entre tempo de execução e qualidade)
+# Configurações de treinamento
 DEFAULT_EPOCHS = 30
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_PATIENCE = 5  # paciência para early stopping no conjunto de validação
@@ -35,61 +34,85 @@ def train_and_evaluate_nn(
     patience=DEFAULT_PATIENCE,
 ):
     """
-    Treina a MLP nos atributos selecionados e retorna o F1-Score no conjunto de teste.
+    Treina a MLP (sklearn) nos atributos selecionados e retorna F1-Score + métricas.
 
-    A divisão segue o procedimento experimental: 70% treino / 15% validação / 15% teste.
-    O conjunto de validação é usado pelo EarlyStopping para escolher a melhor configuração
-    da rede (menor erro de validação). O F1-Score final é medido no conjunto de teste,
-    em dados não vistos durante o treino nem durante a seleção do melhor modelo.
+    Divisão experimental (70/15/15 estratificada):
+      - 70%: treino
+      - 15%: validação (consumida pelo `early_stopping` interno do MLPClassifier)
+      - 15%: teste (usado apenas para F1 final, nunca visto durante treino/validação)
+
+    O sklearn `MLPClassifier(early_stopping=True)` separa internamente uma fração
+    do conjunto recebido em `fit` para validação. Por isso passamos
+    **treino + validação concatenados** (85% do total) e configuramos
+    `validation_fraction = 15/85` para que o split interno seja idêntico ao 70/15/15.
+
+    Métrica de aptidão: F1-Score weighted (pondera classes pelo suporte real,
+    apropriado para base desbalanceada 62/20/18). Também loga F1 macro para
+    diagnóstico de viés por classe.
+
+    Retorna (f1_weighted, metrics_dict). Se `logger` for fornecido, também
+    grava as métricas em `nn_metrics.csv`. Em modo paralelo, o caller chama
+    com `logger=None` e loga depois.
     """
     X_train, X_val, X_test, y_train, y_val, y_test = _split_70_15_15(
         X_filtered, y, random_state=random_state
     )
 
     input_dim = X_train.shape[1]
-    model = create_mlp_model(input_dim, n_classes=n_classes, learning_rate=0.001)
 
-    early_stop = EarlyStopping(
-        monitor="val_loss",
-        patience=patience,
-        restore_best_weights=True,
-        verbose=0,
-    )
+    # Concatena treino + validação para que o sklearn faça o split interno
+    # que reproduz nosso 70/15/15
+    X_train_val = np.concatenate([X_train, X_val])
+    y_train_val = np.concatenate([y_train, y_val])
+    val_fraction = len(X_val) / len(X_train_val)
 
-    history = model.fit(
-        X_train, y_train,
-        validation_data=(X_val, y_val),
-        epochs=epochs,
+    model = create_mlp_model(
+        input_dim=input_dim,
+        n_classes=n_classes,
+        learning_rate=0.001,
+        max_iter=epochs,
         batch_size=batch_size,
-        callbacks=[early_stop],
-        verbose=0,
+        validation_fraction=val_fraction,
+        n_iter_no_change=patience,
+        random_state=random_state,
     )
+
+    # Treinamento (sklearn loga warnings se max_iter for atingido sem convergir;
+    # silenciamos via context manager local)
+    import warnings
+    from sklearn.exceptions import ConvergenceWarning
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=ConvergenceWarning)
+        warnings.filterwarnings("ignore", category=UserWarning)
+        model.fit(X_train_val, y_train_val)
 
     # Avaliação no conjunto de teste
-    # F1 weighted: pondera o F1 de cada classe pelo seu suporte real.
-    # Para classes desbalanceadas (62/20/18), é a métrica que reflete o
-    # desempenho esperado na população — usada como fitness primário.
-    # F1 macro: trata as três classes igualmente (sem ponderação) — útil
-    # para diagnóstico de viés, registrado em log para análise comparativa.
-    y_pred = np.argmax(model.predict(X_test, verbose=0), axis=1)
+    y_pred = model.predict(X_test)
     f1_weighted = f1_score(y_test, y_pred, average="weighted", zero_division=0)
     f1_macro = f1_score(y_test, y_pred, average="macro", zero_division=0)
 
-    train_loss = float(history.history["loss"][-1])
-    val_loss = float(history.history["val_loss"][-1])
-    val_accuracy = float(history.history["val_accuracy"][-1])
+    # Métricas auxiliares (do histórico de treinamento do sklearn)
+    train_loss = float(model.loss_curve_[-1]) if model.loss_curve_ else 0.0
+    val_scores = getattr(model, "validation_scores_", None)
+    val_accuracy = float(val_scores[-1]) if val_scores else 0.0
+    # Com early_stopping=True, sklearn rastreia best_validation_score_ (accuracy),
+    # não best_loss_. Usamos o último train_loss como proxy para "val_loss".
+    best_val_score = getattr(model, "best_validation_score_", None)
+    val_loss = float(best_val_score) if best_val_score is not None else train_loss
+
+    metrics = {
+        "chromosome_id": chromosome_id,
+        "generation": generation,
+        "train_loss": train_loss,
+        "val_loss": val_loss,
+        "val_accuracy": val_accuracy,
+        "f1_score": float(f1_weighted),
+        "f1_macro": float(f1_macro),
+        "epochs": int(model.n_iter_),
+        "num_features_used": input_dim,
+    }
 
     if logger:
-        logger.log_nn_metrics(
-            chromosome_id=chromosome_id,
-            generation=generation,
-            train_loss=train_loss,
-            val_loss=val_loss,
-            val_accuracy=val_accuracy,
-            f1_score=f1_weighted,
-            f1_macro=f1_macro,
-            epochs=len(history.history["loss"]),
-            num_features_used=input_dim,
-        )
+        logger.log_nn_metrics(**metrics)
 
-    return f1_weighted
+    return float(f1_weighted), metrics

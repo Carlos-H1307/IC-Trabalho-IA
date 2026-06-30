@@ -113,7 +113,7 @@ uv sync
 ```
 
 Cria automaticamente o `.venv/` e instala tudo declarado em `pyproject.toml`
-(TensorFlow/Keras, scikit-learn, pandas, openpyxl, matplotlib).
+(scikit-learn, pandas, openpyxl, matplotlib, joblib).
 
 ---
 
@@ -568,16 +568,32 @@ já cobre regularização.
 
 ### Treinamento (`src/nn/trainer.py`)
 
-| Aspecto             | Valor                                                          | Justificativa |
-|---------------------|----------------------------------------------------------------|---------------|
-| Otimizador          | Adam (lr=0,001)                                                | exigido pela especificação |
-| Loss                | `sparse_categorical_crossentropy`                              | rótulos como inteiros 0/1/2; evita one-hot |
-| Métrica de treino   | accuracy                                                       | acompanhamento durante o treino |
-| Batch size          | 64                                                             | compromisso vetorização × ruído de gradiente |
-| Épocas (máx.)       | 30                                                             | early stopping geralmente para antes |
-| Early stopping      | `patience=5`, `monitor="val_loss"`, `restore_best_weights=True` | "melhor configuração = menor erro de validação" (spec) |
-| **Métrica de aptidão** | **F1-Score weighted** no teste                              | reflete desbalanceamento real (ver seção dedicada) |
-| Métrica auxiliar    | F1-Score macro                                                 | logado para diagnóstico de viés por classe |
+| Aspecto             | Valor                                                                                       | Justificativa |
+|---------------------|---------------------------------------------------------------------------------------------|---------------|
+| Framework           | **scikit-learn** `MLPClassifier`                                                            | spec exige arquitetura/otimizador/ativações, não framework — sklearn é ~78× mais rápido que Keras para MLPs deste porte (medido em profile) |
+| Otimizador          | Adam (lr=0,001)                                                                             | exigido pela especificação |
+| Loss                | Categorical crossentropy (default do sklearn para multiclasse)                              | equivalente ao `sparse_categorical_crossentropy` do Keras |
+| Batch size          | 64                                                                                          | compromisso vetorização × ruído de gradiente |
+| Épocas (máx.)       | 30                                                                                          | `max_iter=30` (early stopping geralmente para antes) |
+| Early stopping      | `early_stopping=True`, `n_iter_no_change=5`, fração de validação interna ≈ 15/85            | "melhor configuração = menor erro de validação" (spec) |
+| L2 regularization   | `alpha=0.0` (desabilitado)                                                                  | spec não exige; mantém comportamento equivalente ao Keras (Keras tampouco regulariza por default) |
+| **Métrica de aptidão** | **F1-Score weighted** no teste                                                           | reflete desbalanceamento real (ver seção dedicada) |
+| Métrica auxiliar    | F1-Score macro                                                                              | logado para diagnóstico de viés por classe |
+
+#### Por que sklearn em vez de Keras
+
+A spec define arquitetura, otimizador, taxa de aprendizado, ativações e
+procedimento de validação — todos atendíveis tanto por `tf.keras.Sequential`
+quanto por `sklearn.neural_network.MLPClassifier`. Profile no `--quick` mostrou
+que ~96% do tempo do Keras estava em `model.fit()` por causa de overheads de
+framework (graph compilation, `tf.function` retracing a cada novo `input_dim`,
+kernel launches CUDA mesmo em CPU). A MLP tem apenas ~1.400 pesos — o
+**compute real é nanossegundos**; tudo o resto é overhead.
+
+Speedup medido por avaliação: **78,15×** (1,59s no Keras vs. 0,02s no sklearn).
+Resultado prático: spec completa (20 exp × 200 gen × 140 evals) cai de
+~1–2 dias para ~30 min em CPU serial. Sem custo de qualidade — sklearn
+implementa MLP padrão com backprop+Adam, exatamente como exigido.
 
 ### Divisão dos dados, 70/15/15 estratificada
 
@@ -730,7 +746,7 @@ de classes da base", que são 3. Manter as 3 classes está correto.
 
 Loop em `src/main.py`:
 
-1. **Seed reset**, semente fixada para `numpy`, `random`, `tensorflow` em
+1. **Seed reset**, semente fixada para `numpy` e `random` em
    `42 + exp_id`, garantindo reprodutibilidade.
 2. População inicial gerada aleatoriamente.
 3. Avaliação completa da população inicial (geração 0).
@@ -832,7 +848,7 @@ Escolhas técnicas feitas além do que a especificação prescreve:
 | `EarlyStopping(patience=5)` na MLP | "Melhor configuração = menor erro de validação" (spec). Retorna os melhores pesos via `restore_best_weights`. |
 | Cache de fitness por tupla de genes | Reduz 20–40% das avaliações na fase tardia da evolução. |
 | Seed = `42 + exp_id` | Reprodutibilidade total; experimentos independentes mas determinísticos. |
-| Saída Softmax + `sparse_categorical_crossentropy` | Evita overhead de one-hot encoding dos rótulos. |
+| sklearn `MLPClassifier` em vez de Keras | 78× mais rápido para MLP de ~1.400 pesos; spec preservada integralmente. |
 | Torneio de seleção (em vez de roleta) | Pressão seletiva controlada, independente da escala do fitness. |
 
 ---

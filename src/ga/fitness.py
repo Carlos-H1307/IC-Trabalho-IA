@@ -28,24 +28,31 @@ def evaluate_chromosome(
 
     Resultados são cacheados pela chave (tupla de genes) — isso evita re-treinar
     a rede para cromossomos idênticos que reaparecem durante a evolução.
+
+    Após a avaliação, anexa o dicionário de métricas da NN ao cromossomo via
+    `chromosome.nn_metrics` para que o chamador possa logar mais tarde (útil
+    quando a avaliação acontece em um worker paralelo que não tem acesso ao
+    logger principal).
     """
     active_indices = [i for i, gene in enumerate(chromosome.genes) if gene == 1]
     if not active_indices:
         chromosome.f1_score = 0.0
         chromosome.fitness = 0.0
+        chromosome.nn_metrics = None
         return 0.0
 
     # Cache de avaliações para cromossomos idênticos
     key = chromosome.key()
     if fitness_cache is not None and key in fitness_cache:
-        f1, fitness = fitness_cache[key]
+        f1, fitness, cached_metrics = fitness_cache[key]
         chromosome.f1_score = f1
         chromosome.fitness = fitness
+        chromosome.nn_metrics = cached_metrics
         return fitness
 
     X_filtered = X[:, active_indices]
 
-    f1 = train_and_evaluate_nn(
+    f1, nn_metrics = train_and_evaluate_nn(
         X_filtered,
         y,
         n_classes=n_classes,
@@ -62,9 +69,10 @@ def evaluate_chromosome(
 
     chromosome.f1_score = float(f1)
     chromosome.fitness = float(fitness)
+    chromosome.nn_metrics = nn_metrics
 
     if fitness_cache is not None:
-        fitness_cache[key] = (chromosome.f1_score, chromosome.fitness)
+        fitness_cache[key] = (chromosome.f1_score, chromosome.fitness, nn_metrics)
 
     return chromosome.fitness
 
