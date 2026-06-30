@@ -167,7 +167,24 @@ CLI completa:
 | `--generations`     | `200`                                | Limite superior de gerações |
 | `--experiments`     | `20`                                 | Quantidade de execuções independentes |
 | `--sample-size`     | `3000`                               | Amostra estratificada (0 = base completa) |
-| `--quick`           |,                                    | Atalho: 2 experimentos × 20 gerações, pop 30 |
+| `--workers`         | `1`                                  | Nº de experimentos a rodar em paralelo (processos). Cada worker roda um experimento completo; logs são consolidados ao fim. Sugestões: M3 Pro Max 36 GB → 8; Ryzen 3600 16 GB → 4–6 |
+| `--quick`           | —                                    | Atalho: 2 experimentos × 20 gerações, pop 30 |
+
+### Paralelismo
+
+`--workers N` distribui os **experimentos** (não as gerações dentro de um experimento) entre N processos via `joblib.Parallel` com backend `loky`. Os 20 experimentos são totalmente independentes (sementes distintas, sem dependência de estado), então a paralelização é perfeita.
+
+Cada worker:
+1. Roda um experimento completo (200 gerações × 2 evals + 150 iniciais)
+2. Escreve seu próprio CSV em `logs/_workers/exp{id}/`
+3. Ao fim, o processo principal consolida tudo em `logs/ga_metrics.csv` e `logs/nn_metrics.csv`
+
+Tempo total esperado para a spec (20 experimentos × 200 gerações × amostra de 3000):
+
+| Hardware                 | `--workers 1` | `--workers 4` | `--workers 8` |
+|--------------------------|--------------:|--------------:|--------------:|
+| M3 Pro Max 36 GB         | ~10–15 min    | ~3–5 min      | **~2–3 min**  |
+| Ryzen 3600 + 16 GB       | ~15–25 min    | **~4–7 min**  | (RAM limita)  |
 
 ---
 
