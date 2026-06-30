@@ -325,6 +325,7 @@ diagnóstico da EDA):
 | `CODMUNOCOR` ↔ `ocor_CODIGO_UF` (r=1,000) | **Sim**  | Uma coluna removida por **correlação alta** |
 | `CODMUNRES` ↔ `CODMUNOCOR` (r=0,989)      | **Sim**  | Uma coluna removida por **correlação alta** |
 | Código 9 residual em ASSISTMED (34%), NECROPSIA (29%), ESC (16%)... | **Sim** | **Convertido para NaN** e imputado pela mediana |
+| Desbalanceamento severo das classes (62/20/18, razão 3,53×) | **Sim** | **Oversampling das minoritárias** no conjunto de treino (ver [subseção](#tratamento-do-desbalanceamento-de-classes)) |
 
 ### Sobre o código 9 ("ignorado") do DATASUS
 
@@ -384,29 +385,58 @@ sem ganho informacional. A normalização Min-Max já comprime tudo para [0,1].
 
 ## Pipeline de limpeza
 
-O pré-processamento (`src/data_loader.py`) é determinístico e segue 15 etapas
-**nesta ordem**:
+Todos os tratamentos de dados aplicados, do arquivo bruto até a entrada da MLP,
+estão organizados em **dois estágios**:
 
-| #  | Etapa                                                    | Heurística                              |
-|----|----------------------------------------------------------|-----------------------------------------|
-| 1  | Leitura do arquivo (XLSX/CSV)                            | extensão do arquivo                     |
-| 2  | Remoção de registros sem alvo                            | `dropna(subset=["label_cid"])`          |
-| 3  | Remoção de duplicatas exatas                             | `drop_duplicates`                       |
-| 4  | Checagens de inconsistência (auditoria, não remove)      | datas, idade                            |
-| 5  | Remoção de colunas de **vazamento de alvo**              | lista `TARGET_LEAK_COLUMNS` (14 cols)   |
-| 6  | Remoção de **colunas constantes** (variância zero)       | `nunique(dropna=False) ≤ 1`             |
-| 7  | Remoção de colunas dominadas por "ignorado" (9 > 80%)    | `(col == 9).mean() > 0.80`              |
-| 8  | Remoção de colunas **quase-constantes**                  | moda > 95% dos registros                |
-| 9  | Conversão de "9" residual ("ignorado") para NaN          | colunas em `IGNORADO_CODE_COLUMNS`      |
-| 10 | Remoção de colunas com excesso de NaN                    | `> 50%` de valores nulos                |
-| 11 | Remoção de colunas numéricas **redundantes**             | `|corr| > 0,95`                          |
-| 12 | Codificação de categóricas                                | `LabelEncoder` se `nunique ≤ 50`; descarte se acima |
-| 13 | Imputação de NaN numéricos                                | mediana da coluna                       |
-| 14 | Amostragem estratificada (opcional)                       | 3000 registros (padrão)                 |
-| 15 | Normalização **Min-Max linear**                           | `(x − x_min) / (x_max − x_min)` em [0,1] |
+- **Estágio A — Pré-processamento global** (`src/data_loader.py`): roda **uma vez** por experimento, antes do GA. 17 etapas.
+- **Estágio B — Tratamento por avaliação** (`src/nn/trainer.py`): roda **a cada avaliação de cromossomo** (treino de MLP). 2 etapas.
 
-Após o pipeline, **L = 26 atributos** (de 50 originais) com **3000 registros**
-balanceados estratificadamente (padrão).
+### Estágio A — Pré-processamento global (`src/data_loader.py`)
+
+Determinístico, executado na ordem abaixo:
+
+| #  | Etapa                                                    | O que faz                                                   | Heurística / configuração                                |
+|----|----------------------------------------------------------|-------------------------------------------------------------|----------------------------------------------------------|
+| 1  | **Leitura do arquivo**                                   | Carrega XLSX (via openpyxl) ou CSV (via pandas)             | Extensão do arquivo                                      |
+| 2  | **Drop de registros sem alvo**                           | Remove linhas com `label_cid` nulo                          | `dropna(subset=["label_cid"])`                           |
+| 3  | **Drop de duplicatas exatas**                            | Remove linhas idênticas em todas as colunas                 | `drop_duplicates()` — detecta 3 na base                  |
+| 4  | **Auditoria de idade** (não remove)                      | Relata idades fora de [0, 120]                              | `_check_age_outliers` — detecta 0 inválidas, 11 nulas    |
+| 5  | **Auditoria de datas** (não remove)                      | Relata registros com `DTNASC > DTOBITO`                     | `_check_date_consistency` — detecta 0 inconsistências    |
+| 6  | **Drop de colunas de vazamento de alvo**                 | Remove 14 colunas que codificam diretamente a causa do óbito | Lista explícita em `TARGET_LEAK_COLUMNS`                 |
+| 7  | **Drop de colunas constantes**                           | Remove colunas com `nunique ≤ 1` (variância zero)           | Detecta `TIPOBITO`, `SEXO`, `CAUSAMAT`, `NUDIASINF`      |
+| 8  | **Drop de colunas dominadas por "9" (ignorado DATASUS)** | Remove colunas em `IGNORADO_CODE_COLUMNS` com > 80% de 9s   | `MAX_IGNORADO_RATIO = 0.8` — descarta `EXAME`, `CIRURGIA` |
+| 9  | **Drop de colunas quase-constantes**                     | Remove colunas onde a moda concentra > 95% dos valores      | `MAX_MODE_RATIO = 0.95` — descarta `ESTABDESCR`, `COMUNSVOIM`, `ALTCAUSA` |
+| 10 | **Conversão de "9" residual → NaN**                      | Em colunas DATASUS restantes, transforma 9 em NaN           | Para que a imputação (etapa 14) trate "ignorado" como ausente |
+| 11 | **Drop de colunas com excesso de NaN**                   | Remove colunas com > 50% de valores nulos                   | `MAX_MISSING_RATIO = 0.5` — descarta `SERIESCFAL`, `NUDIASOBCO` |
+| 12 | **Drop de colunas numéricas redundantes**                | Remove uma coluna de cada par com `|corr| > 0,95`           | `MAX_CORRELATION = 0.95` — descarta `CODMUNOCOR`, `ocor_CODIGO_UF` |
+| 13 | **Codificação de variáveis categóricas**                 | Aplica `LabelEncoder` em colunas object/string              | Se `nunique > 50` → descarta (alta cardinalidade)        |
+| 14 | **Imputação de NaN numéricos**                           | Preenche valores ausentes com a **mediana** da coluna       | Robusto a outliers em códigos (`OCUP`, `CODMUN*`)         |
+| 15 | **Codificação do target (`label_cid`)**                  | Mapeia `{C53, C54, C55}` → `{0, 1, 2}` via `LabelEncoder`   | Inteiros consumidos pela softmax da MLP                  |
+| 16 | **Amostragem estratificada** (opcional)                  | Reduz a base mantendo a proporção 62/20/18 das classes      | `DEFAULT_SAMPLE_SIZE = 3000` (use `--sample-size 0` para a base inteira) |
+| 17 | **Normalização Min-Max**                                 | `x' = (x − x_min) / (x_max − x_min)` em [0, 1]              | Exigido pela especificação (seção 3 do enunciado)        |
+
+**Resultado**: de **50 colunas brutas** + ~149k registros → **26 atributos** + amostra estratificada de 3.000 registros (na configuração padrão), prontos para a MLP.
+
+### Estágio B — Tratamento por avaliação (`src/nn/trainer.py`)
+
+Executado **uma vez para cada cromossomo avaliado** pelo GA (com os atributos filtrados pela máscara do cromossomo):
+
+| #  | Etapa                                       | O que faz                                                                | Heurística / configuração                                  |
+|----|---------------------------------------------|--------------------------------------------------------------------------|------------------------------------------------------------|
+| 18 | **Divisão estratificada 70/15/15**          | Splita em treino / validação / teste preservando proporção das classes   | `_split_70_15_15`, `train_test_split(stratify=y)` em cascata |
+| 19 | **Oversampling das classes minoritárias**   | Reamostra com reposição C54 e C55 para igualar o tamanho de C53          | `_oversample_minority_classes`, **apenas no conjunto de treino**; val e teste preservam a distribuição original |
+
+Após o Estágio B, o conjunto de treino balanceado vai para o `MLPClassifier`.
+Validação e teste **nunca são oversampleados** — preservam a distribuição
+populacional real (62/20/18) para que as métricas reflitam o cenário de produção.
+
+> **Mapa rápido**: para detalhes sobre cada etapa, ver:
+> - Vazamento de alvo: [seção "Inconsistências detectadas"](#inconsistências-detectadas)
+> - Tratamento de "9" (DATASUS): [subseção dedicada](#sobre-o-código-9-ignorado-do-datasus)
+> - Quase-constância: [subseção dedicada](#quase-constância-moda--95)
+> - Correlação alta: [subseção dedicada](#correlação-alta-r--095)
+> - Divisão 70/15/15: [seção dedicada na parte da MLP](#divisão-dos-dados-701515-estratificada)
+> - Oversampling: [subseção "Tratamento do desbalanceamento de classes"](#tratamento-do-desbalanceamento-de-classes)
 
 ### Removidos por categoria (resumo)
 
@@ -879,7 +909,7 @@ Escolhas técnicas feitas além do que a especificação prescreve:
 | Remoção de 14 colunas de vazamento de alvo | Sem isso, F1 = 1,0 trivialmente e o GA não tem espaço de busca. |
 | Remoção de colunas constantes (SEXO, TIPOBITO) | Variância zero → zero poder discriminativo. |
 | Remoção de colunas dominadas por "ignorado" (9 > 80%) | EXAME e CIRURGIA têm 94–95% de "ignorado", sem sinal. |
-| LabelEncoder para categóricas em vez de One-Hot | Mantém o cromossomo curto (~28 genes) e fiel à ideia de "selecionar atributos". |
+| LabelEncoder para categóricas em vez de One-Hot | Mantém o cromossomo curto (~26 genes) e fiel à ideia de "selecionar atributos". |
 | Limite de 50% de NaN para descartar coluna | Compromisso entre perda de informação e imputação massiva. |
 | Limite de 50 valores únicos para descartar categóricas | Acima disso, IDs ou nomes livres sem informação discriminativa. |
 | Imputação por mediana (não média) | Robusta a outliers em `CODMUN*`, `OCUP` (códigos com escala estranha). |
@@ -888,6 +918,10 @@ Escolhas técnicas feitas além do que a especificação prescreve:
 | Seed = `42 + exp_id` | Reprodutibilidade total; experimentos independentes mas determinísticos. |
 | sklearn `MLPClassifier` em vez de Keras | 78× mais rápido para MLP de ~1.400 pesos; spec preservada integralmente. |
 | Torneio de seleção (em vez de roleta) | Pressão seletiva controlada, independente da escala do fitness. |
+| Oversampling das minorias no conjunto de treino | Compensa o desbalanceamento 62/20/18 sem alterar val/teste. Necessário porque `MLPClassifier` do sklearn não suporta `class_weight` nem `sample_weight`. Subiu F1 weighted de ~0,48 → ~0,60. |
+| Conversão de "9" residual para NaN (após etapa 8) | Trata o código DATASUS "ignorado" como ausente, não como categoria real. ~155 mil substituições em 8 colunas. |
+| Detecção de quase-constância (moda > 95%) | Captura colunas que escapam dos filtros de variância zero e excesso de NaN (ex.: 100% NaN + 1 valor real). |
+| Detecção de correlação alta (\|r\| > 0,95) entre numéricas | Remove redundância de pares clones (`CODMUNRES` ↔ `CODMUNOCOR` ↔ `ocor_CODIGO_UF`). |
 
 ---
 
