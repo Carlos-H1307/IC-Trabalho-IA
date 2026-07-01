@@ -49,6 +49,8 @@ class GeneticAlgorithm:
         experiment_id=0,
         fitness_cache=None,
         random_state=42,
+        feature_groups=None,
+        fitness_repeats=1,
     ):
         self.population_size = population_size
         self.chromosome_length = chromosome_length
@@ -66,6 +68,12 @@ class GeneticAlgorithm:
         self.experiment_id = experiment_id
         self.fitness_cache = fitness_cache if fitness_cache is not None else {}
         self.random_state = random_state
+        # feature_groups: lista de (nome, [col_indices]) — se None, usa
+        # codificação flat legada onde chromosome_length == X.shape[1].
+        self.feature_groups = feature_groups
+        # fitness_repeats: K avaliações com seeds distintas, F1 = média.
+        # K > 1 reduz o ruído do estimador em sqrt(K) ao custo de K× runtime.
+        self.fitness_repeats = fitness_repeats
 
         # População inicial aleatória
         self.population = [
@@ -92,12 +100,47 @@ class GeneticAlgorithm:
                     generation=0,
                     fitness_cache=self.fitness_cache,
                     random_state=self.random_state,
+                    feature_groups=self.feature_groups,
+                    fitness_repeats=self.fitness_repeats,
                 )
 
     def _select_parent(self):
         """Seleção por torneio usando fitness escalado (normalização linear)."""
         tournament = random.sample(self.population, self.tournament_size)
         return max(tournament, key=lambda c: c.scaled_fitness)
+
+    def _select_two_distinct_parents(self, max_retries=5):
+        """
+        Seleciona dois pais distintos via torneios independentes.
+
+        Sob elitismo forte (10/150) e torneio-3, é frequente que ambos os
+        torneios elejam o mesmo cromossomo (tipicamente o incumbente da
+        elite). Com pais idênticos, o crossover uniforme retorna dois
+        filhos idênticos ao pai — o operador vira um no-op e apenas a
+        mutação contribui para a variação. Repete o torneio do segundo
+        pai até `max_retries` vezes tentando obter um cromossomo
+        distinto por identidade (referência) do primeiro.
+
+        Referência:
+          - Eiben, A. E., & Smith, J. E. (2015). "Introduction to
+            Evolutionary Computing," 2nd ed., Springer, Cap. 5 (Parent
+            Selection). Discute a importância de manter variação entre
+            pais em populações pequenas ou com forte pressão seletiva.
+          - Miller, B. L., & Goldberg, D. E. (1995). "Genetic Algorithms,
+            Tournament Selection, and the Effects of Noise."
+            Complex Systems, 9(3), 193-212.
+
+        Se após `max_retries` ainda não obtiver pais distintos, aceita a
+        colisão — o crossover ainda executa (só é ineficaz) e a mutação
+        pode gerar variação.
+        """
+        p1 = self._select_parent()
+        p2 = self._select_parent()
+        retries = 0
+        while p2 is p1 and retries < max_retries:
+            p2 = self._select_parent()
+            retries += 1
+        return p1, p2
 
     def _log_generation(self, generation):
         fitnesses = [c.fitness for c in self.population]
@@ -124,7 +167,13 @@ class GeneticAlgorithm:
 
     def evolve(self):
         """
-        Loop principal do GA. Retorna (best_chromosome_genes, best_fitness, best_f1).
+        Loop principal do GA. Retorna um dicionário com:
+          - best_genes: list[int] com os genes do melhor cromossomo
+          - best_fitness: float, melhor fitness observado
+          - best_f1: float, F1-Score (weighted) do melhor cromossomo
+          - best_f1_macro: float, F1-Score macro do melhor (se disponível)
+          - best_generation: int, geração em que o melhor foi encontrado
+          - total_generations: int, quantas gerações realmente foram executadas
         """
         # 1) Avalia população inicial
         self._evaluate_population()
@@ -135,14 +184,16 @@ class GeneticAlgorithm:
         best_overall_chromo = max(self.population, key=lambda c: c.fitness)
         best_overall_genes = list(best_overall_chromo.genes)
         best_overall_f1 = best_overall_chromo.f1_score
+        best_overall_f1_macro = self._extract_f1_macro(best_overall_chromo)
+        best_overall_generation = 0
+        last_generation = 0
 
         stagnation = 0
 
         # 2) Evolução steady-state com crossover + mutação
         for generation in range(1, self.max_generations + 1):
-            # Seleciona 2 pais via torneio sobre o pool atual
-            parent1 = self._select_parent()
-            parent2 = self._select_parent()
+            # Seleciona 2 pais distintos via torneios independentes
+            parent1, parent2 = self._select_two_distinct_parents()
 
             # Crossover uniforme (Pc = 0,85)
             child1, child2 = parent1.crossover(parent2, self.crossover_rate)
@@ -166,6 +217,8 @@ class GeneticAlgorithm:
                     generation=generation,
                     fitness_cache=self.fitness_cache,
                     random_state=self.random_state,
+                    feature_groups=self.feature_groups,
+                    fitness_repeats=self.fitness_repeats,
                 )
 
             # Substitui os 2 piores indivíduos (que estão fora do top-10 elite
@@ -181,11 +234,15 @@ class GeneticAlgorithm:
             best_now = self._log_generation(generation=generation)
             best_chromo_now = max(self.population, key=lambda c: c.fitness)
 
+            last_generation = generation
+
             improved = best_now > best_overall_fitness + 1e-9
             if improved:
                 best_overall_fitness = best_now
                 best_overall_genes = list(best_chromo_now.genes)
                 best_overall_f1 = best_chromo_now.f1_score
+                best_overall_f1_macro = self._extract_f1_macro(best_chromo_now)
+                best_overall_generation = generation
                 stagnation = 0
             else:
                 stagnation += 1
@@ -197,4 +254,22 @@ class GeneticAlgorithm:
                 )
                 break
 
-        return best_overall_genes, best_overall_fitness, best_overall_f1
+        return {
+            "best_genes": best_overall_genes,
+            "best_fitness": best_overall_fitness,
+            "best_f1": best_overall_f1,
+            "best_f1_macro": best_overall_f1_macro,
+            "best_generation": best_overall_generation,
+            "total_generations": last_generation,
+        }
+
+    @staticmethod
+    def _extract_f1_macro(chromo):
+        """Extrai o F1 macro do dicionário nn_metrics, se presente."""
+        metrics = getattr(chromo, "nn_metrics", None)
+        if isinstance(metrics, dict) and "f1_macro" in metrics:
+            try:
+                return float(metrics["f1_macro"])
+            except (TypeError, ValueError):
+                return 0.0
+        return 0.0

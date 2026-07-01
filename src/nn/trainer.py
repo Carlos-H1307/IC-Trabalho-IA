@@ -6,9 +6,20 @@ from sklearn.utils import resample
 from nn.model import create_mlp_model
 
 # Configurações de treinamento
-DEFAULT_EPOCHS = 30
+# `max_iter=200` com `n_iter_no_change=15` dá à MLP orçamento suficiente
+# para convergir sob Adam lr=0.001 em subconjuntos de atributos variados;
+# 30 épocas (default anterior) truncavam o treino em muitos cromossomos
+# antes da convergência, inflando o ruído do F1 e a variância entre
+# experimentos. O spec fixa arquitetura/otimizador/lr — não estabelece
+# orçamento máximo — então essa mudança fica dentro do spec.
+# Referência: Prechelt, L. (1998). "Early Stopping - But When?" em
+# "Neural Networks: Tricks of the Trade", Springer LNCS 1524, 55-69.
+# Discute critérios GL (generalization loss) e paciência para MLPs
+# treinados com backprop; a paciência recomendada (5-20 épocas sobre val)
+# é maior que 5 em problemas com validação ruidosa.
+DEFAULT_EPOCHS = 200
 DEFAULT_BATCH_SIZE = 64
-DEFAULT_PATIENCE = 5  # paciência para early stopping no conjunto de validação
+DEFAULT_PATIENCE = 15  # paciência para early stopping no conjunto de validação
 
 
 def _split_70_15_15(X, y, random_state):

@@ -5,10 +5,10 @@ def create_mlp_model(
     input_dim,
     n_classes,
     learning_rate=0.001,
-    max_iter=30,
+    max_iter=200,
     batch_size=64,
     validation_fraction=0.15,
-    n_iter_no_change=5,
+    n_iter_no_change=15,
     random_state=42,
 ):
     """

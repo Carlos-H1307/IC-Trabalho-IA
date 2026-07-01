@@ -31,13 +31,14 @@ total de atributos disponíveis.
 4. [Análise exploratória dos dados (EDA)](#análise-exploratória-dos-dados-eda)
 5. [Inconsistências detectadas](#inconsistências-detectadas)
 6. [Pipeline de limpeza](#pipeline-de-limpeza)
-7. [Algoritmo Genético, escolhas de projeto](#algoritmo-genético--escolhas-de-projeto)
-8. [Rede Neural (MLP), escolhas de projeto](#rede-neural-mlp--escolhas-de-projeto)
+7. [Algoritmo Genético, escolhas de projeto](#algoritmo-genético-escolhas-de-projeto)
+8. [Rede Neural (MLP), escolhas de projeto](#rede-neural-mlp-escolhas-de-projeto)
 9. [Função de aptidão e escalonamento](#função-de-aptidão-e-escalonamento)
 10. [Métrica F1: por que weighted e não macro](#métrica-f1-por-que-weighted-e-não-macro)
-11. [Procedimento experimental](#procedimento-experimental)
-12. [Saídas geradas](#saídas-geradas)
-13. [Decisões pragmáticas](#decisões-pragmáticas)
+11. [Sample size, ruído do F1 e reprodutibilidade](#sample-size-ruído-do-f1-e-reprodutibilidade)
+12. [Procedimento experimental](#procedimento-experimental)
+13. [Saídas geradas](#saídas-geradas)
+14. [Decisões pragmáticas](#decisões-pragmáticas)
 
 ---
 
@@ -168,7 +169,21 @@ CLI completa:
 | `--experiments`     | `20`                                 | Quantidade de execuções independentes |
 | `--sample-size`     | `3000`                               | Amostra estratificada (0 = base completa) |
 | `--workers`         | `1`                                  | Nº de experimentos a rodar em paralelo (processos). Cada worker roda um experimento completo; logs são consolidados ao fim. Sugestões: M3 Pro Max 36 GB → 8; Ryzen 3600 16 GB → 4–6 |
+| `--fitness-repeats` | `1`                                  | K retreinos da MLP por cromossomo. F1 do fitness = média das K execuções com seeds distintas. Reduz o ruído do estimador em √K ao custo de K× runtime. Ver seção *Sample size, ruído do F1 e reprodutibilidade* |
 | `--quick`           | —                                    | Atalho: 2 experimentos × 20 gerações, pop 30 |
+
+### Comando de produção sugerido
+
+Para uma execução com baixa variância entre execuções e resultado estável para o relatório final:
+
+```bash
+uv run python src/main.py \
+    --sample-size 6000 \
+    --fitness-repeats 3 \
+    --workers 4
+```
+
+Racional detalhado na seção *Sample size, ruído do F1 e reprodutibilidade*.
 
 ### Paralelismo
 
@@ -300,6 +315,84 @@ média ~11 anos mais cedo que C54 (corpo). Isso é coerente com a literatura
 epidemiológica (câncer do colo associado a HPV em mulheres mais jovens;
 câncer do corpo associado a fatores hormonais pós-menopausa). Espera-se que
 o GA selecione `idade_obito_anos` na maior parte dos cromossomos vencedores.
+
+### Distribuição geográfica por classe
+
+Análise das colunas de residência (`res_MUNNOMEX`, `res_REGIAO`, `res_SIGLA_UF`,
+`ocor_MUNNOMEX`) revelou **desbalanceamento sistemático da distribuição espacial**
+entre as três classes — não é ruído de amostragem, é viés estrutural. Este
+achado tem implicações diretas para o oversampling (ver mais abaixo).
+
+**Residência em capital (baseline geral: 28,2%)**
+
+| Classe   | n      | % em capital | Odds capital/interior      |
+|----------|--------|--------------|----------------------------|
+| C53      | 92.287 | 28,1%        | 0,39                       |
+| **C54**  | 26.153 | **36,0%**    | **0,56** (+44% vs C53)     |
+| **C55**  | 30.345 | **22,2%**    | **0,29** (−27% vs C53)     |
+
+A diferença entre C54 (36,0%) e C55 (22,2%) é de **13,8 pontos percentuais** — muito
+acima do que se esperaria por amostragem aleatória sob a hipótese nula de
+independência entre classe e local de residência. C54 está **sobre-representado**
+em capitais; C55, **sub-representado**. Para óbito em capital (`ocor_MUNNOMEX`),
+o padrão se repete e é ainda mais acentuado: C54 = 52,5%, C53 = 49,2%, C55 = 31,5%.
+
+**Distribuição regional (% dentro da classe)**
+
+| Classe   | Sudeste   | Nordeste | Sul   | Norte | Centro-Oeste |
+|----------|-----------|----------|-------|-------|--------------|
+| C53      | 33,1%     | 31,3%    | 14,6% | 13,2% | 7,9%         |
+| **C54**  | **53,2%** | 20,6%    | 15,8% | 4,0%  | 6,4%         |
+| **C55**  | **47,5%** | 25,3%    | 15,8% | 5,6%  | 5,9%         |
+
+Baseline populacional da base: Sudeste 39,6%, Nordeste 28,2%, Sul 15,0%,
+Norte 10,0%, Centro-Oeste 7,2%.
+
+C54 está **~34% mais concentrado no Sudeste** que a base geral; C55 também,
+embora menos. C53 (majoritária) segue mais de perto a distribuição populacional
+real, enquanto as minoritárias trazem viés espacial marcado. Top 5 UFs por
+classe (residência): C53 lidera com SP=15,1% enquanto C54 tem SP=28,1% (quase
+o dobro).
+
+**Interpretação epidemiológica**
+
+O padrão é consistente com **variação regional na precisão diagnóstica**, não
+com epidemiologia diferencial: capitais e Sudeste concentram serviços de
+patologia especializados, permitindo classificação precisa como **C54** (corpo
+do útero — exige análise histopatológica). Interior e regiões com menos
+infraestrutura tendem a receber diagnóstico genérico **C55** (útero não
+especificado) — o "C55 alto no Nordeste/Norte" é sinal de **subclassificação
+por falta de acesso**, não de incidência real distinta.
+
+**Implicações para o pipeline (interação com oversampling)**
+
+Este viés interage diretamente com o **oversampling das minoritárias**
+(ver [subseção](#tratamento-do-desbalanceamento-de-classes)). Ao duplicar
+com reposição as linhas de C54 (~2,8×) e C55 (~2,4×) no conjunto de treino,
+amplificamos o sinal "residência em capital + Sudeste" nas amostras C54, e
+o sinal "interior + Nordeste" nas amostras C55. A MLP pode aprender essa
+correlação geográfica espúria como **atalho** para a classe, em vez do sinal
+clínico real. Como as colunas de município (`CODMUNRES`, `CODMUNOCOR`) são
+armazenadas como códigos IBGE inteiros no XLSX, elas atravessam o pipeline
+como features **numéricas ordinais** — o filtro `MAX_CATEGORICAL_CARDINALITY=50`
+não as remove.
+
+**Mitigações consideradas mas não aplicadas** (para manter a base o mais
+próxima possível da spec do trabalho):
+
+- **Deixar o GA decidir**: as colunas `res_*` e `ocor_*` fazem parte do espaço
+  de busca — se o modelo consegue F1 melhor sem elas, o GA tende a desativá-las
+  ao longo das gerações. Proteção parcial: só funciona se o benefício médio for
+  maior que o ruído de fold entre os 20 experimentos.
+- **Diagnóstico auxiliar**: F1 macro é logado em paralelo ao F1 weighted
+  (ver [seção](#métrica-f1-por-que-weighted-e-não-macro)). Se o modelo estivesse
+  explorando o atalho geográfico de forma severa, esperaríamos F1 macro
+  desproporcionalmente alto (recall inflado nas minorias via viés). Como
+  observamos macro < weighted consistentemente, o efeito parece controlado.
+- **Não aplicado**: SMOTE (interpolação em vez de duplicação, reduziria a
+  amplificação mas ainda opera em códigos IBGE tratados como ordinais); remoção
+  ativa das colunas de município antes do GA. Ambas mudariam a base em relação
+  à spec e comprometeriam a comparabilidade.
 
 ### Variáveis disponíveis (50 colunas brutas)
 
@@ -658,6 +751,17 @@ distribuição original 62/20/18 para que as métricas reflitam o cenário real
 de produção. Efeito empírico (--quick): F1 weighted subiu de ~0,48 (sem
 oversampling) para ~0,60 (com).
 
+**Ressalva: amplificação de viés geográfico.** Random oversampling com reposição
+**duplica linhas existentes** em vez de sintetizar exemplos novos. Isso amplifica
+qualquer viés estrutural já presente nas minorias. A EDA
+([subseção](#distribuição-geográfica-por-classe)) mostrou que C54 e C55 têm
+distribuições geográficas sistematicamente diferentes de C53 (C54 sobre-representa
+capitais e Sudeste; C55 sub-representa capitais). Ao replicar 2–3× essas linhas
+no treino, reforçamos "residência em capital + Sudeste → C54" e
+"interior + Nordeste → C55" como sinais espúrios. Aceito como trade-off conhecido;
+diagnóstico via F1 macro em paralelo (não observamos macro > weighted, o que
+seria indicativo de exploração severa do atalho).
+
 **Alternativas consideradas e descartadas:**
 - `class_weight` no sklearn MLP: não suportado.
 - SMOTE (sintético): adiciona dependência (`imbalanced-learn`) e a vantagem
@@ -822,6 +926,106 @@ A escolha **importa muito** porque a base é fortemente desbalanceada:
 (C53 vs. não-C53), alinharia com o título do trabalho ("câncer **do colo**
 do útero"), mas a especificação pede "número de neurônios igual ao número
 de classes da base", que são 3. Manter as 3 classes está correto.
+
+---
+
+## Sample size, ruído do F1 e reprodutibilidade
+
+Uma questão prática: por que os F1 obtidos pelo AG oscilam entre execuções
+e por que 0,60 nunca aparece de forma consistente? A resposta tem três
+componentes.
+
+### Teto do problema (empírico)
+
+Treinar a MLP com **todos os 57 atributos** (sem seleção do AG) sobre
+`--sample-size 3000` produz:
+
+| baseline                             | F1-weighted (5 seeds) |
+|--------------------------------------|-----------------------|
+| MLP em 57 atributos (todos)          | **0,53 ± 0,01**       |
+| MLP em 28 atributos aleatórios       | 0,49 ± 0,02           |
+
+Aumentar o sample não move esse teto significativamente:
+
+| `--sample-size` | F1_all_features |
+|-----------------|-----------------|
+| 3 000           | 0,531           |
+| 6 000           | 0,528           |
+| 10 000          | 0,518           |
+| 20 000          | 0,533           |
+
+Isso é o **ceiling intrínseco** da tarefa (distinguir C53/C54/C55 a partir
+dos atributos que sobram após remover o vazamento). O AG rotineiramente
+encontra subconjuntos com F1 = 0,55–0,57, **superando** o baseline — a
+seleção está ajudando.
+
+### Por que "0,60+" apareceu antes
+
+O que era relatado como "0,60" era o **fitness** (0,9 · F1 + 0,1 ·
+parcimônia), não o F1 puro. Um cromossomo com 3 atributos ativos e F1 =
+0,573 produz fitness = 0,9 · 0,573 + 0,1 · (1 − 3/23) ≈ **0,599** — o
+número mágico "0,60" nunca correspondeu a F1 real.
+
+### Piso de ruído do F1
+
+Com split 15% de teste sobre `sample_size = 3000` (450 linhas de teste,
+das quais ~79 pertencem à classe minoritária C54), o erro-padrão do F1
+ponderado é aproximadamente:
+
+$$\mathrm{SE}(F_1^{w}) \approx \sqrt{\sum_c w_c^2 \cdot \frac{F_1^c (1 - F_1^c)}{n_c}}$$
+
+Numericamente (com F1 por classe ≈ 0,6 / 0,5 / 0,4):
+
+| `sample_size` | tamanho do teste | mín. classe C54 | SE(F1_weighted) |
+|--------------:|-----------------:|----------------:|----------------:|
+|         3 000 |              450 |              79 |         ≈ 0,017 |
+|         6 000 |              900 |             158 |         ≈ 0,012 |
+|        10 000 |            1 500 |             264 |         ≈ 0,009 |
+|        20 000 |            3 000 |             528 |         ≈ 0,007 |
+
+O AG está tentando distinguir cromossomos cujos F1 reais diferem em
+0,01–0,05. Com ruído de 0,017 por avaliação, grande parte da busca
+acontece **dentro** do piso de ruído — ordenamentos são pouco confiáveis.
+
+### Regra prática para escolher `sample_size`
+
+Para ter pelo menos 150–200 exemplos da classe minoritária no conjunto de
+teste (bom para estabilizar o F1 minoritário, que puxa o ruído do
+weighted):
+
+$$\text{sample\_size} \gtrsim \frac{200}{0{,}15 \cdot \pi_{\min}}$$
+
+Para esta base ($\pi_{\min} = 17{,}6\%$): `sample_size ≥ 7 600`. Na prática,
+6 000 já entrega SE ~ 0,012 — bom trade-off runtime × variância.
+
+### Fitness com múltiplas seeds (`--fitness-repeats K`)
+
+Alternativa/complemento à `sample_size`: cada cromossomo é avaliado K
+vezes com seeds distintas (splits 70/15/15 diferentes, inicialização de
+pesos diferente) e o fitness usa a **média** dos K F1. O erro-padrão do
+estimador cai em √K, o que é equivalente estatisticamente a aumentar o
+sample em K vezes (do ponto de vista do estimador), mas mantém a
+diversidade dos splits.
+
+- `K=1` (default): rápido, alto ruído
+- `K=3`: SE / √3 ≈ 0,58×, runtime 3×
+- `K=5`: SE / √5 ≈ 0,45×, runtime 5×
+
+Refs: Bengio & Grandvalet (2004) "No Unbiased Estimator of the Variance
+of K-Fold Cross-Validation", JMLR 5:1089-1105; Nadeau & Bengio (2003)
+"Inference for the Generalization Error", Machine Learning 52(3):239-281.
+
+### Reprodutibilidade entre execuções
+
+Todos os seeds são derivados de `42 + exp_id` (numpy, random, MLP,
+splits, oversampling). Duas execuções do mesmo comando devem produzir
+resultados bit-idênticos por experimento. Se você vê variação
+run-to-run com os mesmos flags, é sintoma de não-determinismo (BLAS
+multi-thread, ordem de agregação em `joblib`, etc.) — abra uma issue.
+
+O que varia legitimamente é o **resultado entre os 20 experimentos**:
+cada um usa uma seed diferente, é isso que dá a curva média que o spec
+pede.
 
 ---
 
